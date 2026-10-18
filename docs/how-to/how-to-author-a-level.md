@@ -42,6 +42,13 @@ decide what a level should teach in the first place, use the
    Each unit is authored, validated and checked against its brief on its
    own; the simulation runs once over the whole set, and one docs pass and
    one handoff cover it. The result lists `files` and per-unit `units`.
+
+   When the units must be designed as one set (an episode or area whose
+   levels should differ from each other and build on each other), add
+   `"set_design": true`. One step then sees every brief, plans the set
+   (what each unit is for, how they vary, the curve), writes every file
+   and revises them together. The plan comes back as `set_plan` and goes
+   into the explanation page.
 2. If it returns `blocked`, read the reason. A missing brief point or an
    unowned path is fixed before running again; validation errors and
    findings name the place in the data. Findings from the checks get up

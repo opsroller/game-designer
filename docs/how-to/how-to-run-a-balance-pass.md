@@ -63,6 +63,11 @@ the pass does not force the data. It returns `status: "needs decision"`.
   game does.
 - If the goal-aware bot fails everywhere, watch a replay for a rule bug
   before tuning. The pass lists suspected tool faults under `handoffs`.
+- If one strategy wins every unit or a metric is pinned at the same value
+  everywhere, that is a fault in the tool, not in your data. The pass
+  marks it tool-wide: it holds no unit, tunes from the other metrics,
+  lists the spoiled metric under `unverified_metrics` and sends the fault
+  to the tool's owner under `handoffs`. Re-run the pass once it is fixed.
 
 ## See also
 

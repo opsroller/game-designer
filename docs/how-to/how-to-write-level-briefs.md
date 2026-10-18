@@ -31,26 +31,37 @@ can then be built with `author-level`.
    are not settled; `problems` means the set itself breaks the
    progression rules (too many new ideas for the units, an idea before
    the one it needs). Fix the design docs or the unit list, not the briefs.
-   Findings from the independent check do not stop the run at once: a
-   revision step closes them and a fresh read-only check reads the set
-   again, up to three checks. A `blocked` result with `findings` or
-   `set_findings` means some remained after the last check; `design_gaps`
-   names those that need the design docs changed.
-3. Read the `sequence` table: one idea per unit, its arc role and the
+   Open choices the design docs leave to you (a unit count, a provisional
+   number) come back as `notes`, with the default the run took; they do
+   not stop it.
+   Blocking findings from the independent check do not stop the run at
+   once: a revision step closes them and a fresh read-only check reads
+   the set again, up to three checks. When only minor wording findings
+   are left, they are fixed in place and the run goes on. A `blocked`
+   result with `findings` or `set_findings` means blocking ones remained
+   after the last check.
+3. Read `design_gaps` and `pace`. A design gap is a problem in the
+   design docs themselves, such as two pages that disagree or a clock too
+   short for the goals it is meant to hold; the briefs follow the docs as
+   written, so send each gap to the owner of the docs it names. `pace`
+   lists briefs whose duration at human pace still does not fit the
+   clock; mark their success rates provisional until a playtest.
+4. Read the `sequence` table: one idea per unit, its arc role and the
    difficulty curve. Rests should follow spikes. The progression table
    rows follow the columns, order and link style of the project's
    existing table; a new table with default columns is made only when the
    project has none.
-4. Ship it: pass the whole result as `prior` to
+5. Ship it: pass the whole result as `prior` to
    `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
    for a work package, or land the branch with
    `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
    The workflow has already committed and pushed the briefs and the
    progression table on `handoff.branch`;
    do not rebuild it.
-5. Build the units with `author-level`, passing the brief paths from
+6. Build the units with `author-level`, passing the brief paths from
    `briefs` in play order: one per run with `brief`, or the whole set in
-   one run with `briefs: [...]`. Then run a balance pass over the set.
+   one run with `briefs: [...]` (add `set_design: true` to design them as
+   one set). Then run a balance pass over the set.
 
 ## If you run it inline
 
