@@ -50,6 +50,11 @@ emotion, clear goals with open methods, keep teaching, risk and reward).
 7. Test: simulate for balance (`economy-balance`), playtest for
    understanding and feeling (`playtesting`).
 
+For a set of units with no briefs yet, the `level-briefs` workflow runs
+the progression steps and step 1 for the whole set: it writes one brief
+per unit in the shape `author-level` checks for, and has a reviewer who
+did not write them check the set.
+
 Once the brief is finished, steps 5-7 are the `author-level` workflow:
 it writes the data, validates it with the project's schema or loader,
 checks it with a reviewer who did not write it and the simulator, and

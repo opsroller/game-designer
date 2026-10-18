@@ -48,10 +48,12 @@ Related: [How to design a feature](../how-to/how-to-design-a-feature.md), [refer
 
 ## Run modes
 
-Run modes v1. Besides its own args, the workflow takes the optional `run` arg defined in the engineering-practices
+Run modes v2. Besides its own args, the workflow takes the optional `run` arg defined in the engineering-practices
 [workflow run modes reference](https://github.com/opsroller/engineering-practices/blob/main/docs/reference/workflow-run-modes.md):
 `run: { mode: "inline" }` runs every phase in the calling session with no subagents, `run.only` runs chosen phases or steps,
 and `run.from` with `run.results` resumes a stopped run. Without `run`, the workflow and its outputs are as above.
 See [how to run a workflow inline](https://github.com/opsroller/engineering-practices/blob/main/docs/how-to/how-to-run-a-workflow-inline.md).
 
 Step labels, for `run.only` and `run.results`: `frame`, `spec`, `<reviewer>:<round>` (`implementer`, `tester`, `exploit`), `revise:<round>`, `playtest-plan`, `docs`, `docs-check`.
+
+Independent steps: every `<reviewer>:<round>` step. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.

@@ -28,13 +28,14 @@ install that too.
   system taken from goal to reviewed spec.
 - **Getting a job done?** The how-to guides cover the role's real tasks:
   [design a feature](docs/how-to/how-to-design-a-feature.md),
+  [write the briefs for a set of levels](docs/how-to/how-to-write-level-briefs.md),
   [author a level from a brief](docs/how-to/how-to-author-a-level.md),
   [run a balance pass](docs/how-to/how-to-run-a-balance-pass.md),
   [reconstruct a reference game](docs/how-to/how-to-reconstruct-a-reference-game.md),
   [run a playtest](docs/how-to/how-to-run-a-playtest.md) and
   [set feel targets](docs/how-to/how-to-set-feel-targets.md).
 - **Looking something up?** The [reference index](docs/reference/index.md)
-  describes the agent, each of the seven skills and the four workflows with
+  describes the agent, each of the seven skills and the five workflows with
   their arguments, outputs and phases. Research sources are in
   [SOURCES.md](SOURCES.md).
 - **Want to understand the job?** [About the game designer role](docs/explanation/about-the-role.md)
