@@ -138,7 +138,9 @@ const SEQ = { type: 'object', properties: {
     difficulty: { type: 'number' }, levers: { type: 'array', items: { type: 'string' } },
   }, required: ['unit', 'idea', 'role', 'difficulty', 'levers'] } },
   table: { type: 'string' },
-  problems: { type: 'array', items: { type: 'string' } },
+  problems: { type: 'array', items: { type: 'string' }, description: 'blocking: rules the set breaks that no unit, order or default within the design can fix' },
+  notes: { type: 'array', items: { type: 'string' }, description: 'non-blocking: deviations a planning note already covers, or accepted with a named default' },
+  design_gaps: { type: 'array', items: { type: 'object', properties: { unit: { type: 'string' }, problem: { type: 'string' }, doc: { type: 'string' } }, required: ['problem'] } },
 }, required: ['rows', 'table', 'problems'] }
 const BRIEF = { type: 'object', properties: {
   unit: { type: 'string' }, idea: { type: 'string' }, feeling: { type: 'string' },
@@ -200,14 +202,23 @@ if (!p.owned) return `level-briefs: blocked; ${p.output_path} is not a path the 
 if (!p.units.length) return 'level-briefs: nothing to do; every unit in range already has a finished brief.'
 if ((p.gaps || []).length) return { status: 'blocked', reason: 'the design docs do not settle this set yet', gaps: p.gaps, notes: p.notes || [], next: 'settle the open ideas with design-feature or the design-spec skill, then run level-briefs again' }
 const notes = p.notes || []
-const notesLine = notes.length ? `\nPlanning notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}` : ''
+let notesLine = notes.length ? `\nPlanning notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}` : ''
 
 phase('Sequence')
 const sq = await agent(`Following the game-designer level-design skill (progression steps 2-5), lay out the sequence for these units in play order: ${p.units.join(', ')}${(p.already_briefed || []).length ? ` (already briefed and fixed: ${p.already_briefed.join(', ')})` : ''}.
 Ideas and dependencies: ${JSON.stringify(p.ideas)}. Targets: ${p.targets || 'none written; give relative difficulty only'}.${notesLine}
-For each unit give: the one idea it is about, its role in that idea's arc (introduce, develop, twist, test, or rest), intended difficulty on a 1-10 scale relative to the set, and the difficulty levers it uses (goal size and variety first, then complexity, then scarcity, then time pressure and precision last). Rules: at most one new idea per unit; no idea before the ideas it needs; introductions are safe; the curve rises with a sawtooth, a rest after each spike, never two maximum spikes in a row. Return rows, the same as a markdown table, and problems: any rule the set cannot meet as given (empty if none). Do not edit files.`, { schema: SEQ, phase: 'Sequence', label: 'sequence' })
+For each unit give: the one idea it is about, its role in that idea's arc (introduce, develop, twist, test, or rest), intended difficulty on a 1-10 scale relative to the set, and the difficulty levers it uses (goal size and variety first, then complexity, then scarcity, then time pressure and precision last). Rules: at most one new idea per unit; no idea before the ideas it needs; introductions are safe; the curve rises with a sawtooth, a rest after each spike, never two maximum spikes in a row. Return rows, the same as a markdown table, and sort anything the set cannot meet into three lists (each empty if none):
+- problems: blocking rule breaks only, where the set breaks a rule above and no choice of idea, role, difficulty, levers or default within the design docs fixes it.
+- notes: deviations that do not stop the briefs: one a planning note above already records (say which), or one you accept with a named default. Never repeat a planning note as a problem.
+- design_gaps: a rule break that comes from the design docs themselves (a fixed unit count, a fixed idea order, numbers that force two spikes), so the set follows them as written; give unit (or "*"), problem and doc. These go to the docs' owner and do not stop the run.
+Do not edit files.`, { schema: SEQ, phase: 'Sequence', label: 'sequence' })
 if (!sq) return 'level-briefs: sequencing failed; nothing written.'
-if ((sq.problems || []).length) return { status: 'blocked', reason: 'the set breaks the progression rules', problems: sq.problems, sequence: sq.table, next: 'change the unit count or the idea order in the design docs, then run again' }
+if ((sq.problems || []).length) return { status: 'blocked', reason: 'the set breaks the progression rules', problems: sq.problems, notes: [...notes, ...(sq.notes || [])], design_gaps: sq.design_gaps || [], sequence: sq.table, next: 'change the unit count or the idea order in the design docs, then run again' }
+const seqNotes = sq.notes || []
+if (seqNotes.length) {
+  notes.push(...seqNotes.map(n => 'sequence: ' + n))
+  notesLine = `\nPlanning and sequence notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}`
+}
 
 const draftPrompt = (row) => `Following the game-designer level-design skill ("Designing one level", step 1), write the brief for unit ${row.unit}. Its place in the set: ${JSON.stringify(row)}. Whole sequence:\n${sq.table}
 Give the five points author-level checks for: ${FIVE}. Make them concrete and checkable: the duration as a time or move range, the success rate as a number matching ${p.targets || 'the set\'s relative difficulty'} for this unit's place, the feeling as one or two words a playtester could confirm, the takeaway as a sentence starting "The player knows". Also give its role, levers, first_contact (where the player first meets the idea and why it is safe; for a test or rest unit, which earlier ideas it mixes) and notes for the author (anything the data must do, never a layout). ${p.pace ? `\nPace: ${p.pace}. Check the duration against the clock at human pace: estimate the moves or actions a first-time player needs (from the goal size, the targets or the simulator's move counts), multiply by the human pace, and compare with the clock this unit gets. Return pace_check: human_duration (the estimate and how you got it), clock, fits (whether a first-time player finishes inside the clock with the margin the targets imply), and note. If it does not fit, change this brief (goal size, duration, target success rate) within the design; if the design's own numbers make it impossible for this unit, keep the brief as the design asks and say so in note.` : ''}${notesLine}
@@ -238,6 +249,7 @@ let minor = []
 let polished = []
 const designGaps = []
 const addGaps = (list) => (list || []).map(g => typeof g === 'string' ? { problem: g } : g).forEach(g => { if (g && g.problem && !designGaps.some(d => gapKey(d) === gapKey(g))) designGaps.push(g) })
+addGaps(sq.design_gaps)
 for (let round = 1; round <= 3; round++) {
   if (round === 1) phase('Check')
   const c = await agent(`You did not write these briefs and must not assume their intent beyond them and the design docs (${design}). Following the game-designer level-design skill, check the set as author-level and a first-time player would:
@@ -341,7 +353,7 @@ result.handoff = {
   docs: [...new Set([...briefPaths, ...docPages])],
   undocumented: docs.undocumented || [],
   notes: [
-    ...notes.map(n => 'planning note: ' + n),
+    ...notes.map(n => n.startsWith('sequence: ') ? n : 'planning note: ' + n),
     ...designGaps.map(g => `design gap${g.doc ? ` in ${g.doc}` : ''}: ${label(g)}`),
     ...paceMisses.map(m => 'pace: ' + m),
     ...docIssues.map(i => 'docs check (minor): ' + docText(i)),
