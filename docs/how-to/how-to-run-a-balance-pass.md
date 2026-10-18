@@ -34,12 +34,28 @@ targets with simulated play, and apply the smallest fixes, using the
 5. Commit the data changes with the updated balance reference in one pull
    request; put the simulation summary table in the PR description.
 
+## If a target cannot be reached
+
+When no data value can meet a target or curve rule (a rate already at its
+ceiling that a rule needs to move, two targets that contradict each other),
+the pass does not force the data. It returns `status: "needs decision"`.
+
+1. Read `target_changes`: each has the current and proposed target, the
+   evidence and the effect on other units. Read `target_check` for what
+   the independent check doubted; fix or drop a proposal it rejects.
+2. Send each proposal to the `decider` it names. Do not edit the targets
+   page until the change is accepted.
+3. Send each item in `handoffs` to its owner role (engineering-practices
+   peer-coordination): a simulator, bot or checker fault is theirs to fix,
+   not yours.
+4. When the decision and fixes land, run the pass again on `held_units`.
+
 ## If results look implausible
 
 - If the random bot wins often, check the simulator loads the same data the
   game does.
 - If the goal-aware bot fails everywhere, watch a replay for a rule bug
-  before tuning.
+  before tuning. The pass lists suspected tool faults under `handoffs`.
 
 ## See also
 

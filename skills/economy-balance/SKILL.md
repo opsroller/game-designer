@@ -54,6 +54,13 @@ judge of experience). Valve's framing applies: a balance change is a hypothesis.
   that is intended for this content.
 - Fix a dominant strategy by raising its cost or adding a counter, not by
   nerfing it into uselessness.
+- If no data value can meet a target (a rate at its ceiling, targets that
+  contradict each other), the target is the problem: propose the smallest
+  change that keeps its intent, with the simulation evidence, to whoever
+  owns the targets. Never bend the data past the design, or the simulator,
+  to make a number pass.
+- If a result comes from the simulator or a bot rather than the data,
+  hand the fault to the tool's owner with the evidence; do not tune around it.
 - Positive feedback loops need a cap, decay or end condition; check runaway
   in long simulations.
 - Faucets and sinks: every currency's income must be matched by sinks the

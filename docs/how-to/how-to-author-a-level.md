@@ -11,7 +11,9 @@ decide what a level should teach in the first place, use the
 
 - The brief is finished: the idea the level teaches or tests, the intended
   feeling, target duration, target success rate, and what the player knows
-  afterwards. The workflow stops if any is missing.
+  afterwards. The workflow stops if any is missing. For a set of units
+  with no briefs yet, write them first (see
+  [How to write the briefs for a set of levels](how-to-write-level-briefs.md)).
 - The project profile names the level or content data path and gives it to
   the game designer, and a data format exists. Defining the format and its
   loader is a gameplay programmer's job.

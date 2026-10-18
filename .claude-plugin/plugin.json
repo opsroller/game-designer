@@ -1,6 +1,6 @@
 {
   "name": "game-designer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Game designer role: rules and systems design, implementable and testable specs, level design and progression, economy and balance with simulation, game feel, playtesting and iteration, and reconstructing an existing game's design from observation.",
   "author": {
     "name": "opsroller"
