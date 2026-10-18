@@ -1,29 +1,15 @@
-# Game Designer
+# Game designer
 
-Game designer: documents how a game plays, designs levels and progression, balances difficulty with simulation, and sets feel targets.
+*Landing page for anyone installing or evaluating this role plugin.*
 
-This plugin is a **job function**, not a project. It says how the job is done; the project it works on says with which tools, in its `CLAUDE.md` and project profile.
-
-## Skills
-
-| Skill | Use when |
-|---|---|
-| `rules-spec` | Use when writing or settling a game's rules spec, including researching how a reference game behaved. |
-| `level-design` | Use when authoring levels, episodes or progression data. |
-| `balance-simulation` | Use after writing or tuning content to check difficulty with automated play. |
-| `game-feel` | Use when defining or reviewing how responsive, punchy and readable the game feels. |
-
-## Workflows
-
-Multi-agent workflows (Claude Code Workflow scripts in `workflows/`).
-
-| Workflow | Does |
-|---|---|
-| `/game-designer:balance-levels` | Simulate a set of levels in parallel, compare to difficulty targets, and propose tuned values |
-
-## Agent
-
-`agents/game-designer.md` defines the role as a subagent.
+The game designer decides what a game should be, from the player's intended
+experience inward, and writes it down so precisely that programmers can build
+it and testers can check it. This plugin gives Claude that job: rules and
+systems design, implementable and testable specs, level design and
+progression, economy and balance with simulation, game feel, playtesting and
+iteration, and faithful reconstruction of an existing game's design from
+observation. It is a job function, not a project: the project you work on
+names the engine, tools, paths and commands in its own `CLAUDE.md` and profile.
 
 ## Install
 
@@ -32,4 +18,30 @@ Multi-agent workflows (Claude Code Workflow scripts in `workflows/`).
 /plugin install game-designer@opsroller
 ```
 
-Versioned on its own with semver tags (`v0.1.0`). Changes follow Conventional Commits.
+The role builds on `engineering-practices` (onboarding, git, provenance);
+install that too.
+
+## Where to go next
+
+- **New to the plugin?** Start with the tutorial,
+  [Design your first feature spec](docs/tutorials/first-task.md): one small
+  system taken from goal to reviewed spec.
+- **Getting a job done?** The how-to guides cover the role's real tasks:
+  [design a feature](docs/how-to/how-to-design-a-feature.md),
+  [run a balance pass](docs/how-to/how-to-run-a-balance-pass.md),
+  [reconstruct a reference game](docs/how-to/how-to-reconstruct-a-reference-game.md),
+  [run a playtest](docs/how-to/how-to-run-a-playtest.md) and
+  [set feel targets](docs/how-to/how-to-set-feel-targets.md).
+- **Looking something up?** The [reference index](docs/reference/index.md)
+  describes the agent, each of the seven skills and the three workflows with
+  their arguments, outputs and phases. Research sources are in
+  [SOURCES.md](SOURCES.md).
+- **Want to understand the job?** [About the game designer role](docs/explanation/about-the-role.md)
+  covers what the job is, where it ends and neighbouring roles begin, its
+  quality bars, and how it grows from junior to senior.
+
+Versioned with semver tags; changes follow Conventional Commits.
+
+## License
+
+Copyright (C) 2026 Charles (opsroller) and contributors. Licensed under the GNU General Public License v2.0 or later (`GPL-2.0-or-later`); see `LICENSE`.

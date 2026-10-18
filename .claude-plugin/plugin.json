@@ -1,14 +1,20 @@
 {
   "name": "game-designer",
   "version": "0.1.0",
-  "description": "Game designer: documents how a game plays, designs levels and progression, balances difficulty with simulation, and sets feel targets.",
+  "description": "Game designer role: rules and systems design, implementable and testable specs, level design and progression, economy and balance with simulation, game feel, playtesting and iteration, and reconstructing an existing game's design from observation.",
   "author": {
     "name": "opsroller"
   },
   "repository": "https://github.com/opsroller/game-designer",
-  "license": "MIT",
+  "license": "GPL-2.0-or-later",
   "keywords": [
     "role",
-    "job-function"
+    "job-function",
+    "game-design",
+    "systems-design",
+    "level-design",
+    "balance",
+    "game-feel",
+    "playtesting"
   ]
 }
