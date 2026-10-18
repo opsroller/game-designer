@@ -9,7 +9,7 @@ export const meta = {
     { title: 'Targets', detail: 'only if a target cannot be met by data: evidence-backed target change proposals, independent check' },
     { title: 'Apply', detail: 'one agent edits data files and re-simulates; then each value a checker prints and the data records is converged (set, re-run, repeat until stable, up to five rounds)' },
     { title: 'Docs', detail: 'balance reference and rationale in the same change; approved target changes applied exactly, with their approval recorded' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results go straight to the handoff notes' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results and issues already on the default branch go straight to the handoff notes; an issue a fix already left ends the loop still blocking' },
     { title: 'Handoff', detail: 'only with apply or approved target changes: commit and push the changed data and docs, re-run the simulator and checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -135,9 +135,9 @@ const SIM = { type: 'object', properties: {
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
-  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
+  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] }, pre_existing: { type: 'boolean' },
 }, required: ['problem', 'severity'] } } }, required: ['issues'] }
-const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, why: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
 const CURVE = { type: 'object', properties: {
   table: { type: 'string' },
   unreachable: { type: 'array', items: { type: 'object', properties: {
@@ -240,8 +240,16 @@ phase('Docs check')
 // so far (pages a fix added included). Up to three checks and two fixes,
 // only while a blocking issue remains; minor issues go to the handoff notes,
 // blocking ones left at the end stop it.
-const docCheckPrompt = (pages) => `Review the documentation pages touched in this balance pass: ${JSON.stringify(pages)}. Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. ${approved.length ? ` The targets page must carry exactly these approved changes, each with who approved it and where the approval is recorded, and no other target change; anything else is blocking: ${JSON.stringify(approved)}.` : ''} Read-only: do not edit anything; return remaining issues.`
-const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
+const docCheckPrompt = (pages) => `Review the documentation pages touched in this balance pass: ${JSON.stringify(pages)}. Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. ${approved.length ? ` The targets page must carry exactly these approved changes, each with who approved it and where the approval is recorded, and no other target change; anything else is blocking: ${JSON.stringify(approved)}.` : ''} ${DOC_SCOPE} Read-only: do not edit anything; return remaining issues.`
+// Judge what this work caused: an issue already true on the default branch,
+// independent of this work, is pre-existing, reported as minor so it goes to
+// the notes and never holds the run or starts a fix. Anything this work made
+// wrong stays blocking, even in a line it did not touch.
+const DOC_SCOPE = 'Judge what this work caused, not the pages\' whole history: an issue is pre_existing: true only when the same issue is already true on the default branch at its merge base, independent of this work (check the page there to confirm); report it, but it never counts as blocking. Anything this work made wrong is not pre-existing, in whatever line it sits: a value or table its data change made stale, a link to a page it moved or renamed, a count now off.'
+const PRE = 'pre-existing (already on the default branch): '
+const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' }
+  : i.pre_existing ? Object.assign({}, i, { severity: 'minor', problem: String(i.problem || '').startsWith(PRE) ? i.problem : PRE + (i.problem || '') })
+  : Object.assign({ severity: 'blocking' }, i)
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
 let docPages = docs ? [...(docs.pages || [])] : []
 let docIssueList = docs ? [] : [{ problem: 'docs check did not run; docs unverified', severity: 'blocking' }]
@@ -251,6 +259,12 @@ let docIssueList = docs ? [] : [{ problem: 'docs check did not run; docs unverif
 let docPrior = []
 let docLeft = []
 let docLeftAll = []
+// The issues a fix left, in the words they were given, so a re-check that
+// reports one again does not start another fix of the same item.
+let docLeftKeys = []
+// Pre-existing issues from every round, kept for the notes and never fixed.
+let docPreAll = []
+const isPre = i => String(i.problem || '').startsWith(PRE)
 const LEFT = 'left by the docs fix (needs a content decision): '
 // A left item keeps the severity of the issue it came from (a plain string
 // counts as blocking), and is prefixed once however often it is left.
@@ -261,15 +275,22 @@ for (let round = 1; docs && round <= 3; round++) {
   const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssueList = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
   docIssueList = docUnique([...(c.issues || []).map(docIssue), ...docLeft])
+  docPreAll = docUnique([...docPreAll, ...docIssueList.filter(isPre)])
+  docIssueList = docIssueList.filter(i => !isPre(i))
   // Minor-only results need no fix and no re-check: they go to the notes.
-  if (!docIssueList.some(i => i.severity !== 'minor') || round === 3) break
-  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why in its problem and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  // Nor do blocking issues a fix has already left for a content decision:
+  // they stay blocking, but another fix and re-check cannot close them.
+  const fixable = docIssueList.filter(i => i.severity !== 'minor' && !String(i.problem || '').startsWith(LEFT) && !docLeftKeys.includes(docText(i)))
+  if (!fixable.length || round === 3) break
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with its page and problem exactly as given here, why you left it, and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
-  docLeft = docUnique((fix.left || []).map(leftIssue))
+  docLeftKeys = [...new Set([...docLeftKeys, ...(fix.left || []).filter(l => l && typeof l === 'object').map(l => docText({ page: l.page, problem: String(l.problem || '').replace(LEFT, '') }))])]
+  docLeft = docUnique((fix.left || []).map(l => l && typeof l === 'object' && l.why ? Object.assign({}, l, { problem: `${l.problem} (${l.why})` }) : l).map(leftIssue))
   docLeftAll = docUnique([...docLeftAll, ...docLeft])
   docPrior = docUnique([...docIssueList, ...docLeftAll])
 }
+docIssueList = [...docIssueList, ...docPreAll]
 const docBlocking = docIssueList.filter(i => i.severity !== 'minor')
 
 const decisions = targetChanges.length > 0

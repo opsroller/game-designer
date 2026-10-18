@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'author-level',
-  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, converge any data value a checker prints (set it, re-run, repeat until stable, bounded rounds), check it against the brief with a fresh reviewer and the simulator, revise, and document it. Takes one brief, or a set of briefs authored together (each unit planned, authored, validated and brief-checked on its own, the simulation run once over the set, one docs pass and one handoff); with set_design: true the set is designed, authored and revised as a whole by one step. Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" } or { briefs: ["<brief page or text>", ...] (in play order; replaces brief), output: "<data directory, optional>", sequence: "<progression page, optional>", set_design: true|false (default false) }',
+  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, converge any data value a checker prints (set it, re-run, repeat until stable, bounded rounds), check it against the brief with a fresh reviewer and the simulator, revise, and document it. Takes one brief, or a set of briefs authored together (each unit planned, authored and validated on its own, one reviewer brief-checking every unit, the simulation run once over the set, one docs pass and one handoff); with set_design: true the set is designed, authored and revised as a whole by one step. Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" } or { briefs: ["<brief page or text>", ...] (in play order; replaces brief), output: "<data directory, optional>", sequence: "<progression page, optional>", set_design: true|false (default false) }',
   phases: [
     { title: 'Plan', detail: 'brief complete, format, validator, simulator, owned path, doc kinds via the compass; per unit in a set' },
     { title: 'Author', detail: 'critical path first, data only, fixed seed; per unit in a set, or the whole set at once with set_design' },
     { title: 'Validate', detail: 'schema or parser, then load; fix until clean; then converge each value a checker prints and the data records (set, re-run, repeat until stable, up to five rounds); per unit in a set' },
-    { title: 'Check', detail: 'fresh read against the brief (per unit) and simulation (once over a set), in parallel' },
+    { title: 'Check', detail: 'fresh read against the brief (one reviewer for every unit of a set) and simulation (once over a set), in parallel' },
     { title: 'Revise', detail: 'smallest data change per finding, re-validate, up to two rounds; one step for the set with set_design' },
     { title: 'Docs', detail: 'progression entries and any format or procedure change, once for a set, each planned page once' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results go straight to the handoff notes' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results and issues already on the default branch go straight to the handoff notes; an issue a fix already left ends the loop still blocking' },
     { title: 'Handoff', detail: 'commit and push the data file (or the set\'s files) and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -108,7 +108,7 @@ const RUN_OUT = await Promise.race([RUN.halted, (async (agent, phase, log) => {
 
 // One brief, or a set of briefs (briefs: [...]) authored together. A set
 // runs plan, author and validate per unit (labels end in the unit's
-// 1-based number), the brief check per unit, the simulation once over the
+// 1-based number), one brief check and the simulation once over the
 // whole set, and docs and the handoff once. With set_design: true the set
 // is designed and authored (and revised) by one step that sees every brief,
 // instead of one step per unit.
@@ -149,9 +149,9 @@ const PLAN = { type: 'object', properties: {
 }, required: ['brief_complete', 'output_path', 'owned', 'format', 'validate_cmd', 'simulator', 'doc_plan'] }
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
-  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
+  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] }, pre_existing: { type: 'boolean' },
 }, required: ['problem', 'severity'] } } }, required: ['issues'] }
-const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, why: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
 // The set designed and authored together: the set plan and each file written.
 const SET_WROTE = { type: 'object', properties: {
   set_plan: { type: 'string' },
@@ -178,6 +178,13 @@ const FINDINGS = { type: 'object', properties: {
   verdict: VERDICT,
   findings: { type: 'array', items: { type: 'string' } }, table: { type: 'string' },
 }, required: ['verdict', 'findings'] }
+// The brief check over a set: one reviewer reads every unit it is given and
+// returns one entry per file, in the order given.
+const BRIEF_SET = { type: 'object', properties: {
+  per_file: { type: 'array', items: { type: 'object', properties: {
+    file: { type: 'string' }, verdict: { type: 'string', enum: ['matches brief', 'off brief'] }, findings: { type: 'array', items: { type: 'string' } },
+  }, required: ['file', 'verdict', 'findings'] } },
+}, required: ['per_file'] }
 // The simulation over a set: one entry per file, in the order given.
 const SIM_SET = { type: 'object', properties: {
   verdict: VERDICT,
@@ -220,6 +227,10 @@ const files = plans.map(p => p.output_path)
 const shared = files.filter((f, i) => files.indexOf(f) !== i)
 if (shared.length) log(`more than one unit planned for ${[...new Set(shared)].join(', ')}; check the units do not overwrite each other`)
 const fileList = files.join(', ')
+// Match a planned path to one a step returned, however it was spelled
+// (./, absolute, backslashes).
+const norm = (x) => String(x || '').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+const same = (a, b) => { const x = norm(a); const y = norm(b); return !!x && !!y && (x === y || x.endsWith('/' + y) || y.endsWith('/' + x)) }
 
 phase('Author')
 const authorRules = `Rules: lay the critical path first, then alternatives, secrets and rests; put the goal, or a lead toward it, where the player sees it early; make first contact with the new idea safe; give any randomness a fixed, recorded seed; write data only (no code, no new fields the format does not define: if the brief needs one, stop and list it for the format's owner); use only the project's own content, never another game's level data.`
@@ -232,10 +243,6 @@ ${units}
 Return set_plan: the set design in a few lines (what each unit is for, how they differ, the curve), and written: one entry per unit in the order given, each with the path written exactly as given above and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { schema: SET_WROTE, phase: 'Author', label: 'author:set' })
   if (!w) return { status: 'blocked', reason: 'authoring the set failed; inspect the working tree', files: plans.map(p => p.output_path) }
   setPlan = w.set_plan || ''
-  // Match each planned path to what came back, however it was spelled
-  // (./, absolute, backslashes); fall back to the unit's place in the list.
-  const norm = (x) => String(x || '').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
-  const same = (a, b) => { const x = norm(a); const y = norm(b); return !!x && !!y && (x === y || x.endsWith('/' + y) || y.endsWith('/' + x)) }
   const back = w.written || []
   wrote = plans.map((p, i) => back.find(x => x && same(x.path, p.output_path)) || (back.length === plans.length && back[i] && back[i].path ? back[i] : null))
 } else {
@@ -286,9 +293,20 @@ await parallel(all.map(i => () => converge(i, 0)))
 
 const simulator = (plans.find(p => p.simulator) || {}).simulator || ''
 // A re-check after a revision gets its own label: recheck:brief:<round>
-// (recheck:brief:<unit>:<round> in a set) and recheck:sim:<round>.
-const briefCheck = (i, round) => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${files[i]} and this brief:\n${fmt(plans[i].brief_summary)}
-Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: it teaches or tests only the brief's idea; that idea's first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief's levers, not from obscurity (hidden rules, unreadable space). Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: round ? (batch ? `recheck:brief:${i + 1}:${round}` : `recheck:brief:${round}`) : tag('check:brief', i), independent: true })
+// and recheck:sim:<round>, for one brief or a set.
+const BRIEF_RULES = 'it teaches or tests only the brief\'s idea; that idea\'s first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief\'s levers, not from obscurity (hidden rules, unreadable space)'
+const briefCheck = (round) => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${files[0]} and this brief:\n${fmt(plans[0].brief_summary)}
+Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: ${BRIEF_RULES}. Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: round ? `recheck:brief:${round}` : 'check:brief', independent: true })
+// A set gets one reviewer for every unit still to check, not one per unit.
+const briefSetCheck = (units, round) => agent(`You did not write these levels and must not assume their intent beyond their briefs. Following the game-designer level-design skill, check each of these ${units.length} files against its brief, one at a time:\n${units.map(i => `${files[i]}:\n${fmt(plans[i].brief_summary)}`).join('\n\n')}
+For each file, walk the critical path in the data as a first-time player would, and report off brief if any of these fail, with the location in the data: ${BRIEF_RULES}. Do not edit files. Return per_file: one entry per file above, in the order given, with the path exactly as given, its verdict (matches brief or off brief) and its findings.`, { schema: BRIEF_SET, phase: 'Check', label: round ? `recheck:brief:${round}` : 'check:brief', independent: true })
+// That file's entry in a set check, matched by path, else by its place.
+const briefOf = (r, units, i) => {
+  const back = (r && r.per_file) || []
+  const k = units.indexOf(i)
+  const e = back.find(x => x && same(x.file, files[i])) || (back.length === units.length ? back[k] : null)
+  return e || { verdict: 'not run', findings: [`brief check returned no result for ${files[i]}; unverified`] }
+}
 const simCheck = (round) => !simulator
   ? Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })
   : !batch
@@ -307,9 +325,11 @@ let pendingBrief = all
 let simPending = true
 for (let round = 0; round <= 2; round++) {
   if (round === 0) phase('Check')
-  const r = await parallel([...pendingBrief.map(i => () => briefCheck(i, round)), ...(simPending ? [() => simCheck(round)] : [])])
-  pendingBrief.forEach((i, k) => { briefRes[i] = r[k] || { verdict: 'not run', findings: ['brief check did not return; unverified'] } })
-  if (simPending) sim = r[pendingBrief.length] || { verdict: 'not run', findings: ['sim check did not return; unverified'] }
+  const briefSteps = !pendingBrief.length ? [] : batch ? [() => briefSetCheck(pendingBrief, round)] : [() => briefCheck(round)]
+  const r = await parallel([...briefSteps, ...(simPending ? [() => simCheck(round)] : [])])
+  const notRun = { verdict: 'not run', findings: ['brief check did not return; unverified'] }
+  if (briefSteps.length) pendingBrief.forEach(i => { briefRes[i] = !r[0] ? notRun : batch ? briefOf(r[0], pendingBrief, i) : r[0] })
+  if (simPending) sim = r[briefSteps.length] || { verdict: 'not run', findings: ['sim check did not return; unverified'] }
   pendingBrief = all.filter(i => failing.brief(briefRes[i]))
   const simFail = all.filter(i => failing.sim(simOf(i)))
   simPending = simFail.length > 0
@@ -360,8 +380,16 @@ phase('Docs check')
 // so far (pages a fix added included). Up to three checks and two fixes,
 // only while a blocking issue remains; minor issues go to the handoff notes,
 // blocking ones left at the end stop it.
-const docCheckPrompt = (pages) => `Review the documentation pages touched for ${fileList}: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. Read-only: do not edit anything; return every issue.`
-const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
+const docCheckPrompt = (pages) => `Review the documentation pages touched for ${fileList}: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. ${DOC_SCOPE} Read-only: do not edit anything; return every issue.`
+// Judge what this work caused: an issue already true on the default branch,
+// independent of this work, is pre-existing, reported as minor so it goes to
+// the notes and never holds the run or starts a fix. Anything this work made
+// wrong stays blocking, even in a line it did not touch.
+const DOC_SCOPE = 'Judge what this work caused, not the pages\' whole history: an issue is pre_existing: true only when the same issue is already true on the default branch at its merge base, independent of this work (check the page there to confirm); report it, but it never counts as blocking. Anything this work made wrong is not pre-existing, in whatever line it sits: a value or table its data change made stale, a link to a page it moved or renamed, a count now off.'
+const PRE = 'pre-existing (already on the default branch): '
+const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' }
+  : i.pre_existing ? Object.assign({}, i, { severity: 'minor', problem: String(i.problem || '').startsWith(PRE) ? i.problem : PRE + (i.problem || '') })
+  : Object.assign({ severity: 'blocking' }, i)
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
 let docPages = [...(docs.pages || [])]
 let docIssueList = []
@@ -371,6 +399,12 @@ let docIssueList = []
 let docPrior = []
 let docLeft = []
 let docLeftAll = []
+// The issues a fix left, in the words they were given, so a re-check that
+// reports one again does not start another fix of the same item.
+let docLeftKeys = []
+// Pre-existing issues from every round, kept for the notes and never fixed.
+let docPreAll = []
+const isPre = i => String(i.problem || '').startsWith(PRE)
 const LEFT = 'left by the docs fix (needs a content decision): '
 // A left item keeps the severity of the issue it came from (a plain string
 // counts as blocking), and is prefixed once however often it is left.
@@ -381,15 +415,22 @@ for (let round = 1; round <= 3; round++) {
   const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssueList = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
   docIssueList = docUnique([...(c.issues || []).map(docIssue), ...docLeft])
+  docPreAll = docUnique([...docPreAll, ...docIssueList.filter(isPre)])
+  docIssueList = docIssueList.filter(i => !isPre(i))
   // Minor-only results need no fix and no re-check: they go to the notes.
-  if (!docIssueList.some(i => i.severity !== 'minor') || round === 3) break
-  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why in its problem and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  // Nor do blocking issues a fix has already left for a content decision:
+  // they stay blocking, but another fix and re-check cannot close them.
+  const fixable = docIssueList.filter(i => i.severity !== 'minor' && !String(i.problem || '').startsWith(LEFT) && !docLeftKeys.includes(docText(i)))
+  if (!fixable.length || round === 3) break
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with its page and problem exactly as given here, why you left it, and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
-  docLeft = docUnique((fix.left || []).map(leftIssue))
+  docLeftKeys = [...new Set([...docLeftKeys, ...(fix.left || []).filter(l => l && typeof l === 'object').map(l => docText({ page: l.page, problem: String(l.problem || '').replace(LEFT, '') }))])]
+  docLeft = docUnique((fix.left || []).map(l => l && typeof l === 'object' && l.why ? Object.assign({}, l, { problem: `${l.problem} (${l.why})` }) : l).map(leftIssue))
   docLeftAll = docUnique([...docLeftAll, ...docLeft])
   docPrior = docUnique([...docIssueList, ...docLeftAll])
 }
+docIssueList = [...docIssueList, ...docPreAll]
 const docBlocking = docIssueList.filter(i => i.severity !== 'minor').map(docText)
 const docMinor = docIssueList.filter(i => i.severity === 'minor').map(docText)
 
