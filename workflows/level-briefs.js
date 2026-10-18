@@ -222,7 +222,14 @@ phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update each unit's row in the progression table (unit, idea, role, levers, target success rate, brief link), leaving the data file column empty until author-level fills it. Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${sq.table}\nBriefs written: ${JSON.stringify(w.written)}`, { phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
-const check = docs ? await agent(`Review the documentation pages touched for these briefs (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Fix what you can; return remaining issues.`, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review the documentation pages touched for these briefs (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
+let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
+if (check && (check.issues || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 const docIssues = check ? check.issues : ['docs check did not run; docs unverified']
 
 return {

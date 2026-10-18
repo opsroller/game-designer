@@ -146,12 +146,20 @@ phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Already written: ${p.spec_path} and ${p.evidence_path} (reference). Add or update the explanation page about deviations from the original (every [chosen] rule that departs from observed behaviour, with reason), and add every cited source to the project's sources/credits reference page following engineering-practices provenance.`, { phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
-const check = docs ? await agent(`Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Fix what you can; return remaining issues as a list.`, { phase: 'Docs check', label: 'docs-check', independent: true }) : null
+const DOCISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Read-only: do not edit anything; return every issue as a list (empty when there are none).`
+let check = docs ? await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
+if (check && (check.issues || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 
 return {
   status: systems.some(s => s.failed) ? 'incomplete' : docs ? 'done' : 'docs missing',
   scope: p.scope, spec: p.spec_path, evidence: p.evidence_path, rule_counts: spec,
   unverified_systems: unverifiedSystems, failed_systems: systems.filter(s => s.failed).map(s => s.system),
-  docs: docs || 'docs step failed', doc_issues: check || 'docs check did not run; docs unverified',
+  docs: docs || 'docs step failed', doc_issues: check ? check.issues : ['docs check did not run; docs unverified'],
 }
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

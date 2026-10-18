@@ -199,7 +199,14 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.do
 if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the change is not done until its docs are written' }
 
 phase('Docs check')
-const check = await agent(`Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Fix what you can; return remaining issues as findings with verdict "not run".`, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
+let check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
+if (check && (check.findings || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.findings.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 
 const unverified = missing.map(m => `${m}: file not fully machine-checked`)
 if (sim.verdict === 'not run') unverified.push(...sim.findings)
