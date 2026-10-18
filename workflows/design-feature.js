@@ -94,7 +94,7 @@ const RUN = ((a, realAgent, realPhase, realLog) => {
     if (value === '__run_halted__') {
       return {
         run: 'inline', status: 'next', next, results: out, reviewers: by, self_reviewed, skipped, logs,
-        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done".',
+        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done". To avoid pasting results back on every call, drive the run with engineering-practices tools/run-inline.mjs and a state file instead: it stores each answer and prints only the next briefs.',
       }
     }
     return { run: mode, status: 'done', result: value, results: out, reviewers: by, self_reviewed, skipped, logs }
@@ -156,7 +156,14 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(f.do
 if (!docs) return 'design-feature: docs step failed; the change is not done until its docs are written.'
 
 phase('Docs check')
-const check = await agent(`Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${docs}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Fix what you can; return remaining problems.`, { schema: GAPS, phase: 'Docs check', label: 'docs-check' })
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${docs}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Read-only: do not edit anything; return remaining problems.`
+let check = await agent(docCheckPrompt, { schema: GAPS, phase: 'Docs check', label: 'docs-check', independent: true })
+if (check && (check.gaps || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.gaps.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: GAPS, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 const docIssues = check ? check.gaps : ['docs check did not run; docs unverified']
 
 return { status: 'done', feature, spec: f.spec_path, decision: f.decision_path, playtest_plan: plan || 'not written', docs, doc_issues: docIssues }

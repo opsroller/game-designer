@@ -93,7 +93,7 @@ const RUN = ((a, realAgent, realPhase, realLog) => {
     if (value === '__run_halted__') {
       return {
         run: 'inline', status: 'next', next, results: out, reviewers: by, self_reviewed, skipped, logs,
-        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done".',
+        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done". To avoid pasting results back on every call, drive the run with engineering-practices tools/run-inline.mjs and a state file instead: it stores each answer and prints only the next briefs.',
       }
     }
     return { run: mode, status: 'done', result: value, results: out, reviewers: by, self_reviewed, skipped, logs }
@@ -146,12 +146,20 @@ phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Already written: ${p.spec_path} and ${p.evidence_path} (reference). Add or update the explanation page about deviations from the original (every [chosen] rule that departs from observed behaviour, with reason), and add every cited source to the project's sources/credits reference page following engineering-practices provenance.`, { phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
-const check = docs ? await agent(`Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Fix what you can; return remaining issues as a list.`, { phase: 'Docs check', label: 'docs-check' }) : null
+const DOCISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Read-only: do not edit anything; return every issue as a list (empty when there are none).`
+let check = docs ? await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
+if (check && (check.issues || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 
 return {
   status: systems.some(s => s.failed) ? 'incomplete' : docs ? 'done' : 'docs missing',
   scope: p.scope, spec: p.spec_path, evidence: p.evidence_path, rule_counts: spec,
   unverified_systems: unverifiedSystems, failed_systems: systems.filter(s => s.failed).map(s => s.system),
-  docs: docs || 'docs step failed', doc_issues: check || 'docs check did not run; docs unverified',
+  docs: docs || 'docs step failed', doc_issues: check ? check.issues : ['docs check did not run; docs unverified'],
 }
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

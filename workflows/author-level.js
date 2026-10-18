@@ -94,7 +94,7 @@ const RUN = ((a, realAgent, realPhase, realLog) => {
     if (value === '__run_halted__') {
       return {
         run: 'inline', status: 'next', next, results: out, reviewers: by, self_reviewed, skipped, logs,
-        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done".',
+        how: 'Do each brief in next, in order: follow its prompt in this session (it may tell you to edit files, commit or push), and shape your answer to its schema when one is given, with every required field. A brief marked independent reviews work this run produced, so do not answer it yourself: send its prompt to a reviewer with no part in the work (the project\'s code-reviewer role, a fresh session or a fresh subagent), use their answer, and name them in run.reviewers under its key; if you must answer it yourself, it is listed in self_reviewed and must be reported as self-reviewed. A brief with a note was answered before without the fields it names. Add each answer to results under its key, then run this workflow again with the same args, run.results set to the merged results and run.reviewers to the merged reviewers. Repeat until status is "done". To avoid pasting results back on every call, drive the run with engineering-practices tools/run-inline.mjs and a state file instead: it stores each answer and prints only the next briefs.',
       }
     }
     return { run: mode, status: 'done', result: value, results: out, reviewers: by, self_reviewed, skipped, logs }
@@ -168,7 +168,7 @@ const checks = [
   ['brief', () => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${p.output_path} and this brief:\n${p.brief_summary}
 Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: it teaches or tests only the brief's idea; that idea's first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief's levers, not from obscurity (hidden rules, unreadable space). Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: 'check:brief', independent: true })],
   ['sim', () => p.simulator
-    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${p.simulator} on ${p.output_path} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${p.targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: 'check:sim' })
+    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${p.simulator} on ${p.output_path} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${p.targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: 'check:sim', independent: true })
     : Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })],
 ]
 
@@ -199,7 +199,14 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.do
 if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the change is not done until its docs are written' }
 
 phase('Docs check')
-const check = await agent(`Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Fix what you can; return remaining issues as findings with verdict "not run".`, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check' })
+// The check only reads, so it stays independent of the docs it judges;
+// fixes are their own step, followed by a fresh check.
+const docCheckPrompt = `Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
+let check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
+if (check && (check.findings || []).length) {
+  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.findings.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
+  if (docFix) check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-recheck', independent: true })
+}
 
 const unverified = missing.map(m => `${m}: file not fully machine-checked`)
 if (sim.verdict === 'not run') unverified.push(...sim.findings)

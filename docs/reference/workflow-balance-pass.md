@@ -56,6 +56,6 @@ Run modes v2. Besides its own args, the workflow takes the optional `run` arg de
 and `run.from` with `run.results` resumes a stopped run. Without `run`, the workflow and its outputs are as above.
 See [how to run a workflow inline](https://github.com/opsroller/engineering-practices/blob/main/docs/how-to/how-to-run-a-workflow-inline.md).
 
-Step labels, for `run.only` and `run.results`: `plan`, `sim:<unit>` (one per unit), `curve`, `targets`, `check:targets`, `apply`, `docs`, `docs-check`.
+Step labels, for `run.only` and `run.results`: `plan`, `sim:<unit>` (one per unit), `curve`, `targets`, `check:targets`, `apply`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent).
 
-Independent steps: `check:targets`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.
+Independent steps: `check:targets`, `docs-check`, `docs-recheck`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.
