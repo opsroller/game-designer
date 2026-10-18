@@ -58,6 +58,9 @@ decide what a level should teach in the first place, use the
    brief or the order, not the data.
 4. Read `unverified`. Anything there was not machine-checked; ask the
    gameplay programmer for the missing validator, loader or simulator.
+   A value a checker prints that the data must record (a computed par or
+   threshold) is set, re-checked and set again until it stops changing,
+   up to five rounds; one still moving is listed as `not converged`.
 5. Playtest the unit with players who have not seen it (see
    [How to run a playtest](how-to-run-a-playtest.md)). The checks catch
    broken and off-target data, not whether it feels right.

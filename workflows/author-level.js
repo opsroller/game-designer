@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'author-level',
-  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, check it against the brief with a fresh reviewer and the simulator, revise, and document it. Takes one brief, or a set of briefs authored together (each unit planned, authored, validated and brief-checked on its own, the simulation run once over the set, one docs pass and one handoff); with set_design: true the set is designed, authored and revised as a whole by one step. Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" } or { briefs: ["<brief page or text>", ...] (in play order; replaces brief), output: "<data directory, optional>", sequence: "<progression page, optional>", set_design: true|false (default false) }',
+  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, converge any data value a checker prints (set it, re-run, repeat until stable, bounded rounds), check it against the brief with a fresh reviewer and the simulator, revise, and document it. Takes one brief, or a set of briefs authored together (each unit planned, authored, validated and brief-checked on its own, the simulation run once over the set, one docs pass and one handoff); with set_design: true the set is designed, authored and revised as a whole by one step. Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" } or { briefs: ["<brief page or text>", ...] (in play order; replaces brief), output: "<data directory, optional>", sequence: "<progression page, optional>", set_design: true|false (default false) }',
   phases: [
     { title: 'Plan', detail: 'brief complete, format, validator, simulator, owned path, doc kinds via the compass; per unit in a set' },
     { title: 'Author', detail: 'critical path first, data only, fixed seed; per unit in a set, or the whole set at once with set_design' },
-    { title: 'Validate', detail: 'schema or parser, then load; fix until clean; per unit in a set' },
+    { title: 'Validate', detail: 'schema or parser, then load; fix until clean; then converge each value a checker prints and the data records (set, re-run, repeat until stable, up to five rounds); per unit in a set' },
     { title: 'Check', detail: 'fresh read against the brief (per unit) and simulation (once over a set), in parallel' },
     { title: 'Revise', detail: 'smallest data change per finding, re-validate, up to two rounds; one step for the set with set_design' },
     { title: 'Docs', detail: 'progression entries and any format or procedure change, once for a set, each planned page once' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched, minor issues go to the handoff notes' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results go straight to the handoff notes' },
     { title: 'Handoff', detail: 'commit and push the data file (or the set\'s files) and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -142,6 +142,9 @@ const PLAN = { type: 'object', properties: {
   validate_cmd: { type: 'string' }, load_cmd: { type: 'string' },
   simulator: { type: 'string' }, targets: { type: 'string' },
   sequence_issues: { type: 'array', items: { type: 'string' } },
+  derived: { type: 'array', items: { type: 'object', properties: {
+    value: { type: 'string' }, command: { type: 'string' }, field: { type: 'string' },
+  }, required: ['value', 'command'] } },
   doc_plan: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['tutorial', 'how-to', 'reference', 'explanation'] }, page: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'page'] } },
 }, required: ['brief_complete', 'output_path', 'owned', 'format', 'validate_cmd', 'simulator', 'doc_plan'] }
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
@@ -161,6 +164,15 @@ const VALID = { type: 'object', properties: {
   ok: { type: 'boolean' }, ran: { type: 'array', items: { type: 'string' } },
   errors: { type: 'array', items: { type: 'string' } },
 }, required: ['ok', 'ran', 'errors'] }
+// A value a checker prints that the data must record, driven to a fixed point.
+const CONVERGED = { type: 'object', properties: {
+  converged: { type: 'boolean' },
+  values: { type: 'array', items: { type: 'object', properties: {
+    value: { type: 'string' }, recorded: { type: 'string' }, rounds: { type: 'number' }, stable: { type: 'boolean' },
+  }, required: ['value', 'stable'] } },
+  open: { type: 'array', items: { type: 'string' } },
+}, required: ['converged', 'values'] }
+const ROUNDS = 5
 const VERDICT = { type: 'string', enum: ['matches brief', 'off brief', 'too easy', 'on target', 'too hard', 'not run'] }
 const FINDINGS = { type: 'object', properties: {
   verdict: VERDICT,
@@ -183,6 +195,7 @@ Do not design anything new and do not edit files. Report:
 - format: the data format and its schema, parser or loader (file and symbol), and example: the path of the closest existing data file to copy the shape from.
 - validate_cmd: the command that checks a data file against its schema or parser without the full game (empty if none exists); load_cmd: the command or test that loads it in the build or a headless run (empty if none).
 - simulator: the command that plays the content headless with bots (empty if none); targets: the balance targets page for this unit (empty if none).
+- derived: values a checker, validator or simulator computes and prints that the data file must also record (a computed par or move count, a threshold, a total that depends on the rest of the data), each with the value's name, the command that prints it and the data field that records it. Empty if none.
 - sequence_issues: read ${sequence}; list breaks of the progression rules if this unit goes where the brief says (more than one new idea, an idea used before it is taught, two maximum spikes in a row). Empty if fine or no table exists.
 - doc_plan: Diataxis kind and page for each doc this change touches (the progression table and data format are reference; why the order is so is explanation; how to add a level is how-to, only if the procedure changes).`
 
@@ -242,6 +255,17 @@ const validate = (i, round) => {
     ? agent(`Validate ${p.output_path}. Run, in order: ${cmds.join(', then ')}. If a command fails on this file, fix the data (never the validator, loader or tests: those belong to their owners) and run it again, up to three times. Return ok only if every listed command ran and passed, the commands run, and errors still open.`, { schema: VALID, phase: 'Validate', label: batch ? `validate:${i + 1}:${round}` : `validate:${round}` })
     : Promise.resolve({ ok: true, ran: [], errors: [] })
 }
+// Converge each derived value: set the field to what the checker prints,
+// re-run, repeat until a re-run prints what the data records, bounded.
+const conv = []
+const converge = (i, round) => {
+  const p = plans[i]
+  const d = p.derived || []
+  if (!d.length) return Promise.resolve({ converged: true, values: [] })
+  return agent(`Converge these values in ${p.output_path}; a checker prints each and the data must record it:\n${d.map(x => `- ${x.value}: printed by ${x.command}${x.field ? `, recorded in ${x.field}` : ''}`).join('\n')}\nFor each: run its command, set the data field to the value it prints (data only; never the checker, validator or simulator), then run the command again${cmdsOf(p).length ? ` and ${cmdsOf(p).join(', ')}` : ''}. Repeat until a re-run prints the value the data records and the data still validates, up to ${ROUNDS} rounds per value. Return converged (every value stable), values (each with the value, what the data now records, the rounds it took, stable), and open: any value not stable after ${ROUNDS} rounds, with the last values seen.`, { schema: CONVERGED, phase: 'Validate', label: batch ? `converge:${i + 1}:${round}` : `converge:${round}` })
+    .then(r => { conv[i] = r || { converged: false, values: [], open: ['converge step did not return; derived values unverified'] }; return conv[i] })
+}
+
 // Returns the blocked result when any of these units failed validation.
 const invalid = (units, after) => {
   const bad = units.filter(i => !vs[i] || !vs[i].ok)
@@ -258,6 +282,7 @@ if (missingAll.length) log(`${missingAll.join(' and ')}; listed as unverified fo
 const vs = await parallel(all.map(i => () => validate(i, 0)))
 const notValid = invalid(all, false)
 if (notValid) return notValid
+await parallel(all.map(i => () => converge(i, 0)))
 
 const simulator = (plans.find(p => p.simulator) || {}).simulator || ''
 // A re-check after a revision gets its own label: recheck:brief:<round>
@@ -311,6 +336,7 @@ for (let round = 0; round <= 2; round++) {
   todo.forEach((i, k) => { vs[i] = rv[k] })
   const broke = invalid(todo, true)
   if (broke) return broke
+  await parallel(todo.map(i => () => converge(i, round + 1)))
 }
 
 phase('Docs')
@@ -331,8 +357,9 @@ if (!docs) return batch
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check of every page touched
-// so far (pages a fix added included). Up to three checks and two fixes;
-// minor issues left at the end go to the handoff notes, blocking ones stop it.
+// so far (pages a fix added included). Up to three checks and two fixes,
+// only while a blocking issue remains; minor issues go to the handoff notes,
+// blocking ones left at the end stop it.
 const docCheckPrompt = (pages) => `Review the documentation pages touched for ${fileList}: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. Read-only: do not edit anything; return every issue.`
 const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
@@ -354,7 +381,8 @@ for (let round = 1; round <= 3; round++) {
   const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssueList = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
   docIssueList = docUnique([...(c.issues || []).map(docIssue), ...docLeft])
-  if (!docIssueList.length || round === 3) break
+  // Minor-only results need no fix and no re-check: they go to the notes.
+  if (!docIssueList.some(i => i.severity !== 'minor') || round === 3) break
   const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why in its problem and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
@@ -370,6 +398,7 @@ const unverified = all.flatMap(i => missingOf(plans[i]).map(m => prefix(i, `${m}
 if (sim.verdict === 'not run') unverified.push(...sim.findings)
 if (batch && simulator) all.forEach(i => { if (simOf(i).verdict === 'not run') unverified.push(...simOf(i).findings.map(f => prefix(i, f))) })
 all.forEach(i => { if (briefRes[i].verdict === 'not run') unverified.push(...briefRes[i].findings.map(f => prefix(i, f))) })
+all.forEach(i => { if (conv[i] && !conv[i].converged) unverified.push(...((conv[i].open || []).length ? conv[i].open : [`derived values not stable after ${ROUNDS} rounds`]).map(f => prefix(i, `not converged: ${f}`))) })
 
 const docIssues = docIssueList.map(docText)
 const status = docBlocking.length ? 'docs missing' : unverified.length ? 'incomplete' : 'done'
@@ -378,7 +407,7 @@ const docsOut = Object.assign({}, docs, { pages: docPages })
 const result = batch ? {
   status,
   files,
-  units: all.map(i => ({ file: files[i], validation: vs[i], brief_check: briefRes[i].findings, sequence_issues: plans[i].sequence_issues || [] })),
+  units: all.map(i => ({ file: files[i], validation: vs[i], derived: (conv[i] || {}).values || [], brief_check: briefRes[i].findings, sequence_issues: plans[i].sequence_issues || [] })),
   simulation: sim.table || sim.verdict,
   set_plan: setPlan,
   unverified,
@@ -389,6 +418,7 @@ const result = batch ? {
   status,
   file: files[0],
   validation: vs[0],
+  derived: (conv[0] || {}).values || [],
   brief_check: briefRes[0].findings,
   simulation: sim.table || sim.verdict,
   sequence_issues: plans[0].sequence_issues || [],
