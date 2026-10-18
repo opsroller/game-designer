@@ -216,10 +216,15 @@ if (together) {
   const units = plans.map((p, i) => `Unit ${i + 1} of ${list.length}, at ${p.output_path} (format ${p.format}, shaped like ${p.example || 'the format reference'}):\n${fmt(p.brief_summary)}\nFull brief:\n${list[i]}`).join('\n\n')
   const w = await agent(`Following the game-designer level-design skill ("Progression: the order ideas arrive" and "Designing one level"), design these ${list.length} units together as one set, in play order, then build each as data. Design the set first: what each unit does that the others do not (no two doing the same job), how layouts, goals and obstacles vary across it, where each new idea first appears and how later units reuse it, and how the difficulty rises with a rest after each spike, as the briefs and ${sequence} ask. Then write every file, each in its own path. ${authorRules}
 ${units}
-Return set_plan: the set design in a few lines (what each unit is for, how they differ, the curve), and written: each path written with, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { schema: SET_WROTE, phase: 'Author', label: 'author:set' })
+Return set_plan: the set design in a few lines (what each unit is for, how they differ, the curve), and written: one entry per unit in the order given, each with the path written exactly as given above and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { schema: SET_WROTE, phase: 'Author', label: 'author:set' })
   if (!w) return { status: 'blocked', reason: 'authoring the set failed; inspect the working tree', files: plans.map(p => p.output_path) }
   setPlan = w.set_plan || ''
-  wrote = plans.map(p => (w.written || []).find(x => x.path === p.output_path) || null)
+  // Match each planned path to what came back, however it was spelled
+  // (./, absolute, backslashes); fall back to the unit's place in the list.
+  const norm = (x) => String(x || '').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+  const same = (a, b) => { const x = norm(a); const y = norm(b); return !!x && !!y && (x === y || x.endsWith('/' + y) || y.endsWith('/' + x)) }
+  const back = w.written || []
+  wrote = plans.map((p, i) => back.find(x => x && same(x.path, p.output_path)) || (back.length === plans.length && back[i] && back[i].path ? back[i] : null))
 } else {
   wrote = await parallel(plans.map((p, i) => () => agent(`Following the game-designer level-design skill ("Designing one level"), build this unit as data at ${p.output_path} in the project's format (${p.format}), shaped like ${p.example || 'the format reference'}. Brief:\n${fmt(p.brief_summary)}\nFull brief:\n${list[i]}
 ${authorRules}${batch ? ` Write only ${p.output_path}; the other units of the set are authored by their own steps.` : ''} Return the path written and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { phase: 'Author', label: tag('author', i) })))

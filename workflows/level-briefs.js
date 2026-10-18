@@ -277,7 +277,11 @@ if (minor.length) {
   if (pol) { (pol.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b }); polished = minor.map(label) }
   else log('polish step returned nothing; minor findings left as they are')
 }
-const paceMisses = rows.map(r => briefs[r.unit]).filter(b => b && b.pace_check && b.pace_check.fits === false).map(b => `${b.unit}: ${b.pace_check.human_duration} against a clock of ${b.pace_check.clock}${b.pace_check.note ? ` (${b.pace_check.note})` : ''}`)
+// A brief still off the clock was kept as the design asks, so the clock,
+// the pace or the goal sizes need a decision: route it as a design gap.
+const paceOff = rows.map(r => briefs[r.unit]).filter(b => b && b.pace_check && b.pace_check.fits === false)
+const paceMisses = paceOff.map(b => `${b.unit}: ${b.pace_check.human_duration} against a clock of ${b.pace_check.clock}${b.pace_check.note ? ` (${b.pace_check.note})` : ''}`)
+addGaps(paceOff.map(b => ({ unit: b.unit, problem: `duration does not fit the clock at human pace: ${b.pace_check.human_duration} against ${b.pace_check.clock}`, doc: p.pace })))
 
 phase('Write')
 const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in the project's brief format (${p.brief_format}${p.example ? `, shaped like ${p.example}` : ''}). Label the five points so author-level finds them: Idea, Feeling, Duration, Target success rate, Takeaway (what the player knows afterwards); add role, levers, first contact, the pace check (if any) and notes below them. Edit briefs only: no level data, no targets, no other unit's finished brief. Keep any license header the project requires on new files.\nBriefs: ${JSON.stringify(rows.map(r => briefs[r.unit]))}\nReturn each unit and the path (and heading, if several share a page) of its brief.`, { schema: WRITE, phase: 'Write', label: 'write' })
