@@ -33,8 +33,13 @@ can then be built with `author-level`.
    the one it needs). Fix the design docs or the unit list, not the briefs.
 3. Read the `sequence` table: one idea per unit, its arc role and the
    difficulty curve. Rests should follow spikes.
-4. Land the briefs and the progression table in one pull request with
-   engineering-practices `deliver-package` or `small-change`.
+4. Ship it: pass the whole result as `prior` to
+   `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
+   for a work package, or land the branch with
+   `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
+   The workflow has already committed and pushed the briefs and the
+   progression table on `handoff.branch`;
+   do not rebuild it.
 5. Build each unit with `author-level`, in play order, passing its brief
    path from `briefs`. Then run a balance pass over the set.
 

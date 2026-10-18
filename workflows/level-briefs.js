@@ -11,6 +11,7 @@ export const meta = {
     { title: 'Write', detail: 'briefs into the project\'s brief location and format' },
     { title: 'Docs', detail: 'progression table rows and the order\'s rationale' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'commit and push the briefs and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -152,6 +153,8 @@ const CHECK = { type: 'object', properties: {
 const WRITE = { type: 'object', properties: {
   written: { type: 'array', items: { type: 'object', properties: { unit: { type: 'string' }, path: { type: 'string' } }, required: ['unit', 'path'] } },
 }, required: ['written'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const ISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
 
 phase('Plan')
@@ -219,12 +222,12 @@ const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in 
 if (!w) return { status: 'blocked', reason: 'writing briefs failed; inspect the working tree', briefs }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update each unit's row in the progression table (unit, idea, role, levers, target success rate, brief link), leaving the data file column empty until author-level fills it. Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${sq.table}\nBriefs written: ${JSON.stringify(w.written)}`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update each unit's row in the progression table (unit, idea, role, levers, target success rate, brief link), leaving the data file column empty until author-level fills it. Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${sq.table}\nBriefs written: ${JSON.stringify(w.written)}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched for these briefs (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
+const docCheckPrompt = `Review the documentation pages touched for these briefs (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
 let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
 if (check && (check.issues || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
@@ -232,7 +235,7 @@ if (check && (check.issues || []).length) {
 }
 const docIssues = check ? check.issues : ['docs check did not run; docs unverified']
 
-return {
+const result = {
   status: !docs ? 'docs missing' : docIssues.length ? 'docs missing' : 'done',
   briefs: w.written,
   sequence: sq.table,
@@ -240,4 +243,24 @@ return {
   doc_issues: docIssues,
   next: `The briefs and docs are written but not committed: land them with engineering-practices deliver-package or small-change. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`,
 }
+if (result.status !== 'done') return result
+
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the briefs ship without being written again.
+phase('Handoff')
+const briefPaths = [...new Set(w.written.map(b => b.path))]
+const hand = await agent(`Hand off the level briefs for ${rows.map(r => r.unit).join(', ')}. If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the briefs (${briefPaths.join(', ')}) and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or brief check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the briefs and docs may be uncommitted', briefs: w.written, sequence: sq.table }
+if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, briefs: w.written, sequence: sq.table }
+result.handoff = {
+  from: 'game-designer:level-briefs',
+  branch: hand.branch,
+  pr: hand.pr || '',
+  head_sha: hand.head_sha || '',
+  tests_pass: true,
+  docs: [...new Set([...briefPaths, ...(docs.pages || [])])],
+  undocumented: docs.undocumented || [],
+}
+result.next = `ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`
+return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

@@ -46,10 +46,11 @@ Below them: role in the idea's arc (`introduce`, `develop`, `twist`,
 | Write | 1 | briefs only | Writes the briefs in the project's format; no level data or targets. |
 | Docs | 1 | yes | Progression table rows with brief links; explanation if the order is new or changed (docs Do step). |
 | Docs check | 1 | fixes only | One kind per page, titles, links (docs Check step). |
+| Handoff | 1 | commits only | Commits the briefs and docs on a feature branch, pushes, runs the docs checks the profile names on the pushed head. Skipped when `status` is `docs missing`. Never opens or merges a PR. |
 
 ## Outputs
 
-Object: `status` (`done`, `docs missing`, `blocked`), `briefs` (`unit`, `path`), `sequence` (markdown table), `docs`, `doc_issues`, `next`. The briefs and docs are left uncommitted; `next` points to engineering-practices `deliver-package` or `small-change`, then `author-level` per unit and `balance-pass` over the set.
+Object: `status` (`done`, `docs missing`, `blocked`), `briefs` (`unit`, `path`), `sequence` (markdown table), `docs` (`pages`, `undocumented`), `doc_issues`, `next`, `handoff` (see below). When `done`, the briefs and docs are pushed on a branch; `next` says to ship them with engineering-practices `deliver-package` (or `land-pr` with no work package), then `author-level` per unit and `balance-pass` over the set. With `docs missing` they are left uncommitted.
 
 ## Stop conditions
 
@@ -63,6 +64,17 @@ Object: `status` (`done`, `docs missing`, `blocked`), `briefs` (`unit`, `path`),
 | The check finds a problem no single brief can fix | `{ status: 'blocked', findings }` with the briefs |
 | Briefs still flagged after two revisions | `{ status: 'blocked', findings }` with the briefs |
 | Write step returns nothing | `{ status: 'blocked' }`; inspect the working tree |
+| Handoff returns nothing or no branch, or the checks fail on the pushed head | `{ status: 'blocked', reason, briefs, sequence }` naming the problem |
+
+## Handoff
+
+`handoff` is the object engineering-practices
+[deliver-package](https://github.com/opsroller/engineering-practices/blob/main/docs/reference/workflow-deliver-package.md)
+takes as `prior`, so pass the whole result and the set of briefs ships without
+being written again: `from` (`game-designer:level-briefs`), `branch`, `pr`,
+`head_sha`, `tests_pass`, `docs` (page paths), `undocumented`. `docs` includes the brief pages. With no
+work package, land the branch with land-pr instead; `next` names both.
+The handoff step never opens, marks ready or merges a PR.
 
 Related: [How to write the briefs for a set of levels](../how-to/how-to-write-level-briefs.md), [author-level workflow](workflow-author-level.md), [level-design skill](skill-level-design.md), [reference index](index.md).
 
@@ -74,6 +86,6 @@ Run modes v2. Besides its own args, the workflow takes the optional `run` arg de
 and `run.from` with `run.results` resumes a stopped run. Without `run`, the workflow and its outputs are as above.
 See [how to run a workflow inline](https://github.com/opsroller/engineering-practices/blob/main/docs/how-to/how-to-run-a-workflow-inline.md).
 
-Step labels, for `run.only` and `run.results`: `plan`, `sequence`, `draft:<unit>`, `check:<round>`, `redraft:<unit>:<round>`, `write`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent).
+Step labels, for `run.only` and `run.results`: `plan`, `sequence`, `draft:<unit>`, `check:<round>`, `redraft:<unit>:<round>`, `write`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent), `handoff`.
 
 Independent steps: every `check:<round>` step, and `docs-check`, `docs-recheck`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not write the briefs (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.

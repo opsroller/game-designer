@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Apply', detail: 'one agent edits data files and re-simulates' },
     { title: 'Docs', detail: 'balance reference and rationale in the same change' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'only with apply: commit and push the changed data and docs, re-run the simulator and checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -121,6 +122,8 @@ const SIM = { type: 'object', properties: {
   verdict: { type: 'string', enum: ['too easy', 'on target', 'too hard'] },
   proposal: { type: 'string' },
 }, required: ['unit', 'verdict', 'table'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const ISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
 const CURVE = { type: 'object', properties: {
   table: { type: 'string' },
@@ -190,12 +193,12 @@ if (apply) {
 }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Update the balance reference with current values and the latest simulation tables; record why the curve changed in the explanation page if the shape changed. Do not change the targets themselves: proposed target changes are not accepted yet and go in the pull request, not the reference. Changes: ${typeof applied === 'string' ? applied : JSON.stringify(applied)}\nProposals:\n${curve}`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Update the balance reference with current values and the latest simulation tables; record why the curve changed in the explanation page if the shape changed. Do not change the targets themselves: proposed target changes are not accepted yet and go in the pull request, not the reference. Changes: ${typeof applied === 'string' ? applied : JSON.stringify(applied)}\nProposals:\n${curve}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched in this balance pass (${docs}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Read-only: do not edit anything; return remaining issues.`
+const docCheckPrompt = `Review the documentation pages touched in this balance pass (${JSON.stringify(docs)}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Read-only: do not edit anything; return remaining issues.`
 let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
 if (check && (check.issues || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
@@ -203,7 +206,7 @@ if (check && (check.issues || []).length) {
 }
 
 const decisions = targetChanges.length > 0
-return {
+const result = {
   status: unverified.length ? 'incomplete' : !docs ? 'docs missing' : decisions || handoffs.length ? 'needs decision' : 'done',
   unverified_units: unverified,
   proposals: curve,
@@ -218,4 +221,31 @@ return {
     ? `${decisions ? 'Send target_changes, with their evidence and target_check, to the decider each names; once accepted, update the targets reference. ' : ''}${handoffs.length ? 'Send each handoff to its owner role (engineering-practices peer-coordination); do not edit their tools. ' : ''}Then re-run balance-pass on held_units.`
     : 'playtest the changed units; commit data and docs in one pull request (engineering-practices deliver-package or small-change)',
 }
+// With apply false nothing changed, so there is nothing to hand off.
+if (!apply || ['incomplete', 'docs missing'].includes(result.status)) return result
+
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the applied pass ships without being simulated again.
+phase('Handoff')
+const hand = await agent(`Hand off this balance pass. If you are on the default branch, cut a Conventional branch (fix/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the content data files the Apply step changed and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push; leave held units (${held.join(', ') || 'none'}), tools and the targets page as they are. On the pushed head run the checks that apply: ${p.simulator} on each changed unit, any data validator or load test, the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the changed data and docs may be uncommitted', unverified_units: unverified, proposals: curve }
+if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, unverified_units: unverified, proposals: curve }
+result.handoff = {
+  from: 'game-designer:balance-pass',
+  branch: hand.branch,
+  pr: hand.pr || '',
+  head_sha: hand.head_sha || '',
+  tests_pass: true,
+  docs: docs.pages || [],
+  undocumented: docs.undocumented || [],
+  notes: [
+    ...(held.length ? [`held unchanged, waiting on a target decision or a tool fix: ${held.join(', ')}`] : []),
+    ...(decisions ? ['proposed target changes are not applied; they go in the PR body for their decider'] : []),
+    ...result.doc_issues.map(d => 'docs check: ' + d),
+  ],
+}
+result.next = decisions || handoffs.length
+  ? `${result.next} Meanwhile, for the changes already applied: ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }`
+  : 'playtest the changed units; ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }'
+return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

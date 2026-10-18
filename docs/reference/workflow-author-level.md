@@ -34,10 +34,11 @@ afterwards (`level-design`, "Designing one level", step 1).
 | Revise | 1 per round, plus re-checks | data only | Smallest data change per finding, re-validates, re-runs only the checks that failed; up to two rounds. |
 | Docs | 1 | yes | Progression table row with file and seed; format reference, how-to or explanation only if they changed (docs Do step). |
 | Docs check | 1 | fixes only | One kind per page, titles, links (docs Check step). |
+| Handoff | 1 | commits only | Commits the data file and docs on a feature branch, pushes, runs the validator, load test, test suite and docs checks on the pushed head. Skipped when `status` is `docs missing`. Never opens or merges a PR. |
 
 ## Outputs
 
-Object: `status` (`done`; `incomplete` when the project lacks a validator or a loader, or the simulation or brief check did not run; `docs missing` when the docs step failed or the docs check left issues; `blocked`), `file`, `validation` (`ok`, `ran`, `errors`), `brief_check`, `simulation`, `sequence_issues`, `unverified`, `next`, `docs`, `doc_issues`.
+Object: `status` (`done`; `incomplete` when the project lacks a validator or a loader, or the simulation or brief check did not run; `docs missing` when the docs step failed or the docs check left issues; `blocked`), `file`, `validation` (`ok`, `ran`, `errors`), `brief_check`, `simulation`, `sequence_issues`, `unverified`, `next`, `docs` (`pages`, `undocumented`), `doc_issues`, `handoff` (see below). `next` names the playtest and how to ship the handoff.
 
 ## Stop conditions
 
@@ -49,6 +50,17 @@ Object: `status` (`done`; `incomplete` when the project lacks a validator or a l
 | Data fails validation after three fixes | `{ status: 'blocked' }` with errors |
 | Still off brief or off target after two revisions | `{ status: 'blocked' }` with open findings and the simulation table |
 | No validator, no loader, or no simulator | Runs on with what exists; each missing one listed under `unverified`, `status: 'incomplete'` |
+| Handoff returns nothing or no branch, or the checks fail on the pushed head | `{ status: 'blocked', reason, file }` naming the problem |
+
+## Handoff
+
+`handoff` is the object engineering-practices
+[deliver-package](https://github.com/opsroller/engineering-practices/blob/main/docs/reference/workflow-deliver-package.md)
+takes as `prior`, so pass the whole result and the unit ships without
+being authored again: `from` (`game-designer:author-level`), `branch`, `pr`,
+`head_sha`, `tests_pass`, `docs` (page paths), `undocumented`, `notes`. With no
+work package, land the branch with land-pr instead; `next` names both.
+The handoff step never opens, marks ready or merges a PR.
 
 Related: [How to author a level from a brief](../how-to/how-to-author-a-level.md), [level-design skill](skill-level-design.md), [reference index](index.md).
 
@@ -60,6 +72,6 @@ Run modes v2. Besides its own args, the workflow takes the optional `run` arg de
 and `run.from` with `run.results` resumes a stopped run. Without `run`, the workflow and its outputs are as above.
 See [how to run a workflow inline](https://github.com/opsroller/engineering-practices/blob/main/docs/how-to/how-to-run-a-workflow-inline.md).
 
-Step labels, for `run.only` and `run.results`: `plan`, `author`, `validate:<round>`, `check:brief`, `check:sim`, `revise:<round>`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent).
+Step labels, for `run.only` and `run.results`: `plan`, `author`, `validate:<round>`, `check:brief`, `check:sim`, `revise:<round>`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent), `handoff`.
 
 Independent steps: `check:brief`, `check:sim`, `docs-check`, `docs-recheck`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.

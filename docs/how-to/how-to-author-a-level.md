@@ -42,8 +42,13 @@ decide what a level should teach in the first place, use the
 5. Playtest the unit with players who have not seen it (see
    [How to run a playtest](how-to-run-a-playtest.md)). The checks catch
    broken and off-target data, not whether it feels right.
-6. Commit the data file with the updated progression table in one pull
-   request, and put the simulation table in the description.
+6. Ship it: pass the whole result as `prior` to
+   `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
+   for a work package, or land the branch with
+   `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
+   The workflow has already committed and pushed the data file and the
+   progression table on `handoff.branch`;
+   do not rebuild it. Put the simulation table in the PR description.
 
 ## If the checks disagree
 

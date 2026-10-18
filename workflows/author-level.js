@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Revise', detail: 'smallest data change per finding, re-validate, up to two rounds' },
     { title: 'Docs', detail: 'progression entry and any format or procedure change' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'commit and push the data file and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -122,6 +123,8 @@ const PLAN = { type: 'object', properties: {
   sequence_issues: { type: 'array', items: { type: 'string' } },
   doc_plan: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['tutorial', 'how-to', 'reference', 'explanation'] }, page: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'page'] } },
 }, required: ['brief_complete', 'output_path', 'owned', 'format', 'validate_cmd', 'simulator', 'doc_plan'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const VALID = { type: 'object', properties: {
   ok: { type: 'boolean' }, ran: { type: 'array', items: { type: 'string' } },
   errors: { type: 'array', items: { type: 'string' } },
@@ -195,13 +198,13 @@ const brief_check = results.brief
 const sim = results.sim
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update this unit's row in the progression table (unit, idea, levers, target success rate, file), recording ${p.output_path} and its seed. Update the data format reference only if the format changed, the how-to for adding a level only if the procedure changed, and the explanation only if the order or curve changed.${sim && sim.table ? `\nLatest simulation table:\n${sim.table}` : ''}\nProgression issues found at planning: ${JSON.stringify(p.sequence_issues || [])}`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update this unit's row in the progression table (unit, idea, levers, target success rate, file), recording ${p.output_path} and its seed. Update the data format reference only if the format changed, the how-to for adding a level only if the procedure changed, and the explanation only if the order or curve changed.${sim && sim.table ? `\nLatest simulation table:\n${sim.table}` : ''}\nProgression issues found at planning: ${JSON.stringify(p.sequence_issues || [])}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the change is not done until its docs are written' }
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
+const docCheckPrompt = `Review the documentation pages touched for ${p.output_path} (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
 let check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
 if (check && (check.findings || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.findings.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
@@ -214,7 +217,7 @@ if (brief_check.verdict === 'not run') unverified.push(...brief_check.findings)
 
 const docIssues = check ? check.findings : ['docs check did not run; docs unverified']
 
-return {
+const result = {
   status: docIssues.length ? 'docs missing' : unverified.length ? 'incomplete' : 'done',
   file: p.output_path,
   validation: v,
@@ -226,4 +229,24 @@ return {
   docs,
   doc_issues: docIssues,
 }
+if (docIssues.length) return result
+
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the unit ships without being authored again.
+phase('Handoff')
+const hand = await agent(`Hand off the unit at ${p.output_path}. If you are on the default branch, cut a Conventional branch (feat/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the data file ${p.output_path} and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: ${cmds.length ? cmds.join(', ') + ', ' : ''}the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the unit and docs may be uncommitted', file: p.output_path }
+if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, file: p.output_path }
+result.handoff = {
+  from: 'game-designer:author-level',
+  branch: hand.branch,
+  pr: hand.pr || '',
+  head_sha: hand.head_sha || '',
+  tests_pass: true,
+  docs: docs.pages || [],
+  undocumented: docs.undocumented || [],
+  notes: unverified,
+}
+result.next = `${result.next}; ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }`
+return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)
