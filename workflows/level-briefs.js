@@ -183,7 +183,7 @@ const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: 
 const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
   page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
 }, required: ['problem', 'severity'] } } }, required: ['issues'] }
-const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
 const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 
 phase('Plan')
@@ -312,14 +312,29 @@ const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking'
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
 let docPages = docs ? [...(docs.pages || [])] : []
 let docIssues = docs ? [] : [{ problem: 'docs step failed', severity: 'blocking' }]
+// Each re-check is told what the last check found, so it confirms those
+// fixes instead of judging the pages afresh; an issue the fix left for a
+// content decision stays blocking whatever the re-check says.
+let docPrior = []
+let docLeft = []
+let docLeftAll = []
+const LEFT = 'left by the docs fix (needs a content decision): '
+// A left item keeps the severity of the issue it came from (a plain string
+// counts as blocking), and is prefixed once however often it is left.
+const leftIssue = (l) => { const i = typeof l === 'string' ? { problem: l, severity: 'blocking' } : Object.assign({}, l, { severity: l.severity === 'minor' ? 'minor' : 'blocking' }); return Object.assign(i, { problem: String(i.problem || '').startsWith(LEFT) ? i.problem : LEFT + (i.problem || '') }) }
+const docUnique = (list) => list.filter((i, n) => list.findIndex(j => docText(j) === docText(i)) === n)
+const docPriorLine = (prior) => prior.length ? `\nThe last check found these issues and a fix step has tried to close them; confirm each against the pages now and report any still present, with its severity, alongside anything new:\n- ${prior.map(docText).join('\n- ')}` : ''
 for (let round = 1; docs && round <= 3; round++) {
-  const c = await agent(docCheckPrompt(docPages), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
+  const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssues = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
-  docIssues = (c.issues || []).map(docIssue)
+  docIssues = docUnique([...(c.issues || []).map(docIssue), ...docLeft])
   if (!docIssues.length || round === 3) break
-  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssues.map(docText).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssues.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why in its problem and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
+  docLeft = docUnique((fix.left || []).map(leftIssue))
+  docLeftAll = docUnique([...docLeftAll, ...docLeft])
+  docPrior = docUnique([...docIssues, ...docLeftAll])
 }
 const docBlocking = docIssues.filter(i => i.severity !== 'minor')
 

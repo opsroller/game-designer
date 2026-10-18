@@ -41,7 +41,7 @@ Matching an existing game:
 | Field | Value |
 |---|---|
 | `name` | `game-designer` |
-| `version` | `0.8.0` |
+| `version` | `0.9.0` |
 | `author.name` | `opsroller` |
 | `repository` | `https://github.com/opsroller/game-designer` |
 | `license` | `GPL-2.0-or-later` |
