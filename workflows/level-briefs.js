@@ -10,7 +10,7 @@ export const meta = {
     { title: 'Revise', detail: 'revise the briefs (and the sequence, for set findings) against the findings, then a fresh read-only re-check; up to four checks and three revisions; only minor findings left: polish them in place (briefs and the matching sequence rows) and go on; blocking findings left after the fourth check go on as open items' },
     { title: 'Write', detail: 'briefs into the project\'s brief location and format' },
     { title: 'Docs', detail: 'progression table rows in the shape of the project\'s existing table, and the order\'s rationale' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results go straight to the handoff notes' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results and issues in lines this work did not change go straight to the handoff notes; an issue a fix already left ends the loop still blocking' },
     { title: 'Handoff', detail: 'commit and push the briefs and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -177,15 +177,16 @@ const REVISED = { type: 'object', properties: {
   table: { type: 'string' },
   rows: SEQ.properties.rows,
   design_gaps: { type: 'array', items: { type: 'string' } },
+  pace: { type: 'string' },
 }, required: ['briefs', 'design_gaps'] }
 const WRITE = { type: 'object', properties: {
   written: { type: 'array', items: { type: 'object', properties: { unit: { type: 'string' }, path: { type: 'string' } }, required: ['unit', 'path'] } },
 }, required: ['written'] }
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
-  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
+  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] }, pre_existing: { type: 'boolean' },
 }, required: ['problem', 'severity'] } } }, required: ['issues'] }
-const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'object', properties: { page: { type: 'string' }, problem: { type: 'string' }, why: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] } }, required: ['problem', 'severity'] } } }, required: ['pages'] }
 const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 
 phase('Plan')
@@ -203,8 +204,13 @@ if (!p) return 'level-briefs: planning failed; nothing written.'
 if (!p.owned) return `level-briefs: blocked; ${p.output_path} is not a path the project profile gives the game designer. Hand the set to its owner or get the profile changed.`
 if (!p.units.length) return 'level-briefs: nothing to do; every unit in range already has a finished brief.'
 if ((p.gaps || []).length) return { status: 'blocked', reason: 'the design docs do not settle this set yet', gaps: p.gaps, notes: p.notes || [], next: 'settle the open ideas with design-feature or the design-spec skill, then run level-briefs again' }
-const notes = [...(p.notes || [])]
-let notesLine = notes.length ? `\nPlanning notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}` : ''
+// Each note once, however many steps report it; the prompts carry the list
+// once, and briefs do not copy it into their own notes.
+const notes = []
+const addNotes = (list) => (list || []).forEach(n => { if (n && !notes.includes(n)) notes.push(n) })
+addNotes(p.notes)
+const NOTES_USE = 'follow the defaults they name; do not copy them into a brief\'s notes, which hold only what this unit\'s data must do'
+let notesLine = notes.length ? `\nPlanning notes (open choices and assumptions, not blockers; ${NOTES_USE}): ${JSON.stringify(notes)}` : ''
 
 phase('Sequence')
 const sq = await agent(`Following the game-designer level-design skill (progression steps 2-5), lay out the sequence for these units in play order: ${p.units.join(', ')}${(p.already_briefed || []).length ? ` (already briefed and fixed: ${p.already_briefed.join(', ')})` : ''}.
@@ -218,8 +224,8 @@ if (!sq) return 'level-briefs: sequencing failed; nothing written.'
 if ((sq.problems || []).length) return { status: 'blocked', reason: 'the set breaks the progression rules', problems: sq.problems, notes: [...notes, ...(sq.notes || [])], design_gaps: sq.design_gaps || [], sequence: sq.table, next: 'change the unit count or the idea order in the design docs, then run again' }
 const seqNotes = sq.notes || []
 if (seqNotes.length) {
-  notes.push(...seqNotes.map(n => 'sequence: ' + n))
-  notesLine = `\nPlanning and sequence notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}`
+  addNotes(seqNotes.map(n => 'sequence: ' + n))
+  notesLine = `\nPlanning and sequence notes (open choices and assumptions, not blockers; ${NOTES_USE}): ${JSON.stringify(notes)}`
 }
 
 const draftPrompt = (row) => `Following the game-designer level-design skill ("Designing one level", step 1), write the brief for unit ${row.unit}. Its place in the set: ${JSON.stringify(row)}. Whole sequence:\n${sq.table}
@@ -247,6 +253,10 @@ const label = f => typeof f === 'string' ? f : f.unit ? `${f.unit}: ${f.problem}
 const norm = f => typeof f === 'string' ? { problem: f, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, f)
 const gapKey = g => `${g.unit || '*'}|${g.problem}`
 let table = sq.table
+// Plan's pace is a snapshot (the clock, the human pace, any probe numbers it
+// quotes); a revision that changes what it rests on returns it updated, and
+// the checks read the latest one. Each brief's own pace_check wins over it.
+let pace = p.pace || ''
 let open = []
 let setOpen = []
 let minor = []
@@ -254,6 +264,16 @@ let polished = []
 const designGaps = []
 const addGaps = (list) => (list || []).map(g => typeof g === 'string' ? { problem: g } : g).forEach(g => { if (g && g.problem && !designGaps.some(d => gapKey(d) === gapKey(g))) designGaps.push(g) })
 addGaps(sq.design_gaps)
+// Rows and table move together: rows a step changed replace theirs, and a
+// table it did not return is rebuilt from the rows, so Docs never shows a
+// table older than the rows.
+const rowsTable = () => ['| unit | idea | role | difficulty | levers |', '|---|---|---|---|---|', ...rows.map(r => `| ${r.unit} | ${r.idea} | ${r.role} | ${r.difficulty} | ${(r.levers || []).join(', ')} |`)].join('\n')
+const setRows = (changed, t) => {
+  let moved = false
+  if (Array.isArray(changed)) rows.forEach((r, k) => { const x = changed.find(y => y && y.unit === r.unit); if (x) { rows[k] = x; moved = true } })
+  if (t) table = t
+  else if (moved) table = rowsTable()
+}
 const CHECKS = 4
 let lastRound = 0
 for (let round = 1; round <= CHECKS; round++) {
@@ -262,8 +282,8 @@ for (let round = 1; round <= CHECKS; round++) {
   const c = await agent(`You did not write these briefs and must not assume their intent beyond them and the design docs (${design}). Following the game-designer level-design skill, check the set as author-level and a first-time player would:
 - each brief states all five points (${FIVE}) concretely enough to check: a duration range, a success-rate number, a feeling a playtester can confirm, a takeaway the player could say;
 - each unit has one new idea at most, and no idea appears before the ideas it needs (${JSON.stringify(p.ideas)});
-- introductions are safe, the curve has rests after spikes and never two maximum spikes in a row, and success rates fall where ${p.targets || 'the relative difficulty'} says they should;${p.pace ? `
-- each duration fits the clock at human pace (${p.pace}): read each brief's pace_check and redo the arithmetic;` : ''}
+- introductions are safe, the curve has rests after spikes and never two maximum spikes in a row, and success rates fall where ${p.targets || 'the relative difficulty'} says they should;${pace ? `
+- each duration fits the clock at human pace (${pace}): read each brief's pace_check and redo the arithmetic from the brief's own numbers (goal size, move counts); where they differ from the pace summary, the brief's numbers are current;` : ''}
 - no two units do the same job (each teaches, tests or lets the player express something the others do not);
 - each brief agrees with its row in the sequence: the same idea, role and levers, and a target success rate that fits the row's difficulty.
 Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}${notesLine}${designGaps.length ? `\nKnown design gaps, already routed to the design docs' owner (do not report them again): ${JSON.stringify(designGaps)}` : ''}
@@ -284,11 +304,11 @@ Sort what you find. A problem the briefs or the sequence can fix is a finding: p
 Unit findings:\n- ${[...open, ...minor.filter(f => f.unit)].map(label).join('\n- ') || 'none'}
 Set findings:\n- ${[...setOpen, ...minor.filter(f => !f.unit)].map(label).join('\n- ') || 'none'}
 Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}${notesLine}
-Return briefs: the full revised brief of every unit you changed, with all five points; table: the revised sequence as a markdown table (the current one if unchanged); rows: the revised sequence rows, only if they changed; design_gaps. The Write step writes the briefs to files, so do not edit files here.`, { schema: REVISED, phase: 'Revise', label: `revise:${round}` })
+Return briefs: the full revised brief of every unit you changed, with all five points (and its pace_check redone if its goal size, duration or move counts changed); table: the revised sequence as a markdown table (the current one if unchanged); rows: the revised sequence rows, only if they changed; design_gaps;${pace ? ` pace: the pace summary below with any number it quotes (move counts, probe results, goal sizes) brought up to date with your changes, only if one changed. Pace: ${pace}` : ''} The Write step writes the briefs to files, so do not edit files here.`, { schema: REVISED, phase: 'Revise', label: `revise:${round}` })
   if (!rv) return { status: 'blocked', reason: `revision ${round} returned nothing`, findings: open.map(label), set_findings: setOpen.map(label), design_gaps: designGaps, sequence: table, briefs }
   ;(rv.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b })
-  if (rv.table) table = rv.table
-  if (Array.isArray(rv.rows) && rv.rows.length && rows.every(r => rv.rows.some(x => x.unit === r.unit))) rows.splice(0, rows.length, ...rows.map(r => rv.rows.find(x => x.unit === r.unit)))
+  setRows(rv.rows, rv.table)
+  if (pace && rv.pace) pace = rv.pace
   addGaps(rv.design_gaps)
 }
 if (open.some(f => f.unit === '*')) return { status: 'blocked', reason: 'the brief check did not return', findings: open.map(label), design_gaps: designGaps, sequence: table, briefs, next: 'run again, or resume from the check with run.results (see the run-modes reference)' }
@@ -301,18 +321,17 @@ const minorLeft = openItems.length ? minor.map(label) : []
 const resume = openItems.length ? `close the open items, then run level-briefs again with the same args and run: { results: <this run's results without the keys revise:${lastRound - 1}, check:${lastRound} and every key after them (write, docs, docs-check, docs-fix*, docs-recheck*, handoff)>, reviewers: <this run's reviewers> }: the last revision and check run again on the drafted set without redoing Plan, Sequence and Draft (results come back from a run started with run: {}, in any mode). ${setOpen.length ? 'Set findings may need the unit count or the idea order changed in the design docs first.' : 'Settle what a finding needs first (a planning note, a design-doc change); a hand edit to the written briefs is not seen by the resumed revision.'}` : ''
 if (openItems.length) log(`${openItems.length} blocking findings left after ${lastRound} checks; carried to the handoff as open items`)
 if (minor.length && !openItems.length) {
-  const pol = await agent(`Fix these minor findings in place: wording and clarity only. Change only the words of the briefs they name; keep each brief's idea, numbers, role and levers as they are. If a fix still changes anything a sequence row records (idea, role, difficulty, levers) or the target success rate the table shows, change the matching rows and table to agree, so the docs show the same values as the briefs.\n- ${minor.map(label).join('\n- ')}\nSequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}\nReturn briefs: the full brief of every unit you changed, with all five points; rows: the full sequence rows, only if any changed; table: the sequence as a markdown table, only if it changed. The Write step writes them to files, so do not edit files here.`, { schema: POLISHED, phase: 'Revise', label: 'polish' })
+  const pol = await agent(`Fix these minor findings in place: wording and clarity only. Change only the words of the briefs they name; keep each brief's idea, numbers, role and levers as they are. If a fix still changes anything a sequence row records (idea, role, difficulty, levers) or the target success rate the table shows, return the matching rows changed to agree, so the docs show the same values as the briefs.\n- ${minor.map(label).join('\n- ')}\nSequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}\nReturn briefs: the full brief of every unit you changed, with all five points; rows: the full sequence rows, only if any changed; table: the sequence as a markdown table, only if it changed. The Write step writes them to files, so do not edit files here.`, { schema: POLISHED, phase: 'Revise', label: 'polish' })
   if (pol) {
     (pol.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b })
-    if (pol.table) table = pol.table
-    if (Array.isArray(pol.rows) && pol.rows.length) rows.forEach((r, k) => { const x = pol.rows.find(y => y && y.unit === r.unit); if (x) rows[k] = x })
+    setRows(pol.rows, pol.table)
     polished = minor.map(label)
   } else log('polish step returned nothing; minor findings left as they are')
 }
 // The brief and its sequence row must agree on role and levers after the
 // last change; a mismatch left here goes to the notes for the docs owner.
 const disagree = rows.filter(r => { const b = briefs[r.unit]; return b && ((b.role && b.role !== r.role) || (Array.isArray(b.levers) && b.levers.length && b.levers.join('|') !== (r.levers || []).join('|'))) })
-if (disagree.length) notes.push(...disagree.map(r => `sequence: ${r.unit}: brief and sequence row disagree (brief role ${briefs[r.unit].role || '-'}, levers ${(briefs[r.unit].levers || []).join(', ') || '-'}; row role ${r.role}, levers ${(r.levers || []).join(', ')}); the docs follow the sequence`))
+if (disagree.length) addNotes(disagree.map(r => `sequence: ${r.unit}: brief and sequence row disagree (brief role ${briefs[r.unit].role || '-'}, levers ${(briefs[r.unit].levers || []).join(', ') || '-'}; row role ${r.role}, levers ${(r.levers || []).join(', ')}); the docs follow the sequence`))
 // A brief still off the clock was kept as the design asks, so the clock,
 // the pace or the goal sizes need a decision: route it as a design gap.
 const paceOff = rows.map(r => briefs[r.unit]).filter(b => b && b.pace_check && b.pace_check.fits === false)
@@ -324,7 +343,7 @@ const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in 
 if (!w) return { status: 'blocked', reason: 'writing briefs failed; inspect the working tree', briefs }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. First read the project's existing progression or plan table (${progression}) and follow its shape: its columns and their order, its row order, its link style and its file. Add or update each unit's row in that shape, filling the columns it has from the briefs and leaving columns that author-level fills later (a data file, a seed) empty; do not add, drop or reorder its columns. Only when the project has no such table, create one with these columns: unit, idea, role, levers, target success rate, brief link, data file (empty until author-level fills it). Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${table}\nBriefs written: ${JSON.stringify(w.written)}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. First read the project's existing progression or plan table (${progression}) and follow its shape: its columns and their order, its row order, its link style and its file. Add or update each unit's row in that shape, filling the columns it has from the briefs and leaving columns that author-level fills later (a data file, a seed) empty; do not add, drop or reorder its columns. Only when the project has no such table, create one with these columns: unit, idea, role, levers, target success rate, brief link, data file (empty until author-level fills it). Record why the ideas arrive in this order in the explanation page if the order is new or changed. Take each row's values from the sequence below and each target success rate from its brief, which are the current ones.\nSequence:\n${table}\nBriefs written: ${JSON.stringify(w.written)}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
@@ -332,8 +351,15 @@ phase('Docs check')
 // so far (pages a fix added included). Up to three checks and two fixes,
 // only while a blocking issue remains; minor issues go to the handoff notes,
 // blocking ones left at the end stop it.
-const docCheckPrompt = (pages) => `Review the documentation pages touched for these briefs: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. Read-only: do not edit anything; return remaining issues.`
-const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
+const docCheckPrompt = (pages) => `Review the documentation pages touched for these briefs: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. ${DOC_SCOPE} Read-only: do not edit anything; return remaining issues.`
+// Judge only what this work changed: an issue in a line it did not add or
+// change is pre-existing, reported as minor so it goes to the notes and
+// never holds the run or starts a fix.
+const DOC_SCOPE = 'Judge only what this work changed: compare each page with the default branch (the diff from its merge base). An issue in a line this work did not add or change is pre_existing: true; report it, but it never counts as blocking.'
+const PRE = 'pre-existing (not changed by this work): '
+const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' }
+  : i.pre_existing ? Object.assign({}, i, { severity: 'minor', problem: String(i.problem || '').startsWith(PRE) ? i.problem : PRE + (i.problem || '') })
+  : Object.assign({ severity: 'blocking' }, i)
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
 let docPages = docs ? [...(docs.pages || [])] : []
 let docIssues = docs ? [] : [{ problem: 'docs step failed', severity: 'blocking' }]
@@ -343,6 +369,12 @@ let docIssues = docs ? [] : [{ problem: 'docs step failed', severity: 'blocking'
 let docPrior = []
 let docLeft = []
 let docLeftAll = []
+// The issues a fix left, in the words they were given, so a re-check that
+// reports one again does not start another fix of the same item.
+let docLeftKeys = []
+// Pre-existing issues from every round, kept for the notes and never fixed.
+let docPreAll = []
+const isPre = i => String(i.problem || '').startsWith(PRE)
 const LEFT = 'left by the docs fix (needs a content decision): '
 // A left item keeps the severity of the issue it came from (a plain string
 // counts as blocking), and is prefixed once however often it is left.
@@ -353,15 +385,22 @@ for (let round = 1; docs && round <= 3; round++) {
   const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssues = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
   docIssues = docUnique([...(c.issues || []).map(docIssue), ...docLeft])
+  docPreAll = docUnique([...docPreAll, ...docIssues.filter(isPre)])
+  docIssues = docIssues.filter(i => !isPre(i))
   // Minor-only results need no fix and no re-check: they go to the notes.
-  if (!docIssues.some(i => i.severity !== 'minor') || round === 3) break
-  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssues.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why in its problem and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  // Nor do blocking issues a fix has already left for a content decision:
+  // they stay blocking, but another fix and re-check cannot close them.
+  const fixable = docIssues.filter(i => i.severity !== 'minor' && !String(i.problem || '').startsWith(LEFT) && !docLeftKeys.includes(docText(i)))
+  if (!fixable.length || round === 3) break
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssues.map(i => `${docText(i)} [${i.severity}]`).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with its page and problem exactly as given here, why you left it, and the severity it was given here.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
-  docLeft = docUnique((fix.left || []).map(leftIssue))
+  docLeftKeys = [...new Set([...docLeftKeys, ...(fix.left || []).filter(l => l && typeof l === 'object').map(l => docText({ page: l.page, problem: String(l.problem || '').replace(LEFT, '') }))])]
+  docLeft = docUnique((fix.left || []).map(l => l && typeof l === 'object' && l.why ? Object.assign({}, l, { problem: `${l.problem} (${l.why})` }) : l).map(leftIssue))
   docLeftAll = docUnique([...docLeftAll, ...docLeft])
   docPrior = docUnique([...docIssues, ...docLeftAll])
 }
+docIssues = [...docIssues, ...docPreAll]
 const docBlocking = docIssues.filter(i => i.severity !== 'minor')
 
 const result = {
