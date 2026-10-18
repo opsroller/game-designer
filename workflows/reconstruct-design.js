@@ -9,6 +9,7 @@ export const meta = {
     { title: 'Spec', detail: 'one agent writes spec and evidence log' },
     { title: 'Docs', detail: 'reference, deviations explanation, sources' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'commit and push the spec, evidence log and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -114,6 +115,8 @@ const PLAN = { type: 'object', properties: {
   spec_path: { type: 'string' }, evidence_path: { type: 'string' },
   doc_plan: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string' }, page: { type: 'string' } }, required: ['kind', 'page'] } },
 }, required: ['scope', 'systems', 'spec_path', 'evidence_path', 'doc_plan'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const OBS = { type: 'object', properties: {
   system: { type: 'string' },
   sources: { type: 'array', items: { type: 'string' } },
@@ -143,23 +146,47 @@ const spec = await agent(`Following the game-designer design-spec and design-rec
 if (!spec) return { status: 'blocked', reason: 'spec writing failed', systems: p.systems }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Already written: ${p.spec_path} and ${p.evidence_path} (reference). Add or update the explanation page about deviations from the original (every [chosen] rule that departs from observed behaviour, with reason), and add every cited source to the project's sources/credits reference page following engineering-practices provenance.`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Already written: ${p.spec_path} and ${p.evidence_path} (reference). Add or update the explanation page about deviations from the original (every [chosen] rule that departs from observed behaviour, with reason), and add every cited source to the project's sources/credits reference page following engineering-practices provenance. Return pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 const DOCISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Read-only: do not edit anything; return every issue as a list (empty when there are none).`
+const docCheckPrompt = `Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${JSON.stringify(docs)}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Read-only: do not edit anything; return every issue as a list (empty when there are none).`
 let check = docs ? await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
 if (check && (check.issues || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
   if (docFix) check = await agent(docCheckPrompt, { schema: DOCISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
 }
 
-return {
+const result = {
   status: systems.some(s => s.failed) ? 'incomplete' : docs ? 'done' : 'docs missing',
   scope: p.scope, spec: p.spec_path, evidence: p.evidence_path, rule_counts: spec,
   unverified_systems: unverifiedSystems, failed_systems: systems.filter(s => s.failed).map(s => s.system),
   docs: docs || 'docs step failed', doc_issues: check ? check.issues : ['docs check did not run; docs unverified'],
 }
+if (!docs) return result
+
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the reconstruction ships without being researched again.
+phase('Handoff')
+const hand = await agent(`Hand off the reconstruction of ${p.scope}. If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the spec ${p.spec_path}, the evidence log ${p.evidence_path} and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or provenance check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the spec and docs may be uncommitted', systems: p.systems }
+if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, systems: p.systems }
+result.handoff = {
+  from: 'game-designer:reconstruct-design',
+  branch: hand.branch,
+  pr: hand.pr || '',
+  head_sha: hand.head_sha || '',
+  tests_pass: true,
+  docs: [...new Set([p.spec_path, p.evidence_path, ...(docs.pages || [])])],
+  undocumented: docs.undocumented || [],
+  notes: [
+    ...result.unverified_systems.map(s => `${s}: verification did not run`),
+    ...result.failed_systems.map(s => `${s}: research failed; listed as open in the spec`),
+    ...result.doc_issues.map(d => 'docs check: ' + d),
+  ],
+}
+result.next = 'ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }'
+return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

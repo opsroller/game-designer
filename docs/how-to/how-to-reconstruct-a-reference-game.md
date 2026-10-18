@@ -28,6 +28,13 @@ a sourced, original rules spec, using the `reconstruct-design` workflow.
    unverified or failed at the top need another pass.
 4. Rerun for just those systems with the `systems` argument.
 5. Read the deviations explanation page and agree each **[chosen]** deviation.
+   Then ship it: pass the whole result as `prior` to
+   `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
+   for a work package, or land the branch with
+   `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
+   The workflow has already committed and pushed the spec, evidence log
+   and docs on `handoff.branch`;
+   do not rebuild it.
 6. After implementation, compare the build with the reference footage side
    by side and file deltas with numbers (the `design-reconstruction` skill,
    step 8).

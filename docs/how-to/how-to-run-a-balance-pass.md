@@ -31,8 +31,15 @@ targets with simulated play, and apply the smallest fixes, using the
    re-simulates, and lists files that belong to someone else.
 4. Playtest the changed units (see [How to run a playtest](how-to-run-a-playtest.md)).
    Simulation confirms numbers, not feeling.
-5. Commit the data changes with the updated balance reference in one pull
-   request; put the simulation summary table in the PR description.
+5. Ship it: pass the whole result as `prior` to
+   `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
+   for a work package, or land the branch with
+   `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
+   The workflow has already committed and pushed the data changes
+   and the updated balance reference on `handoff.branch`;
+   do not rebuild it. Put the simulation summary table in
+   the PR description. A run with `"apply": false` changes nothing and
+   returns no handoff.
 
 ## If a target cannot be reached
 

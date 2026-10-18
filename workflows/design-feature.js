@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Playtest plan', detail: 'questions, method, success criteria' },
     { title: 'Docs', detail: 'update every planned doc page in the same change' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'commit and push the spec, decision record, playtest plan and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -117,6 +118,8 @@ const FRAME = { type: 'object', properties: {
   spec_path: { type: 'string' }, decision_path: { type: 'string' },
   doc_plan: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['tutorial', 'how-to', 'reference', 'explanation'] }, page: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'page'] } },
 }, required: ['problem', 'systems', 'spec_path', 'doc_plan'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const GAPS = { type: 'object', properties: { gaps: { type: 'array', items: { type: 'string' } } }, required: ['gaps'] }
 
 phase('Frame')
@@ -152,13 +155,13 @@ const plan = await agent(`Following the game-designer playtesting skill, write a
 if (!plan) log('playtest plan not written; listed as open in the result')
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(f.doc_plan)}. Already written: ${f.spec_path} (reference) and the decision record (explanation). Update any index or landing page that should link them, and tell the gameplay-programmer's next work item which rule IDs and numbers are new (write it in the hand-off note the project uses).`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(f.doc_plan)}. Already written: ${f.spec_path} (reference) and the decision record (explanation). Update any index or landing page that should link them, and tell the gameplay-programmer's next work item which rule IDs and numbers are new (write it in the hand-off note the project uses). Return pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 if (!docs) return 'design-feature: docs step failed; the change is not done until its docs are written.'
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${docs}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Read-only: do not edit anything; return remaining problems.`
+const docCheckPrompt = `Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${JSON.stringify(docs)}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Read-only: do not edit anything; return remaining problems.`
 let check = await agent(docCheckPrompt, { schema: GAPS, phase: 'Docs check', label: 'docs-check', independent: true })
 if (check && (check.gaps || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.gaps.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
@@ -166,5 +169,25 @@ if (check && (check.gaps || []).length) {
 }
 const docIssues = check ? check.gaps : ['docs check did not run; docs unverified']
 
-return { status: 'done', feature, spec: f.spec_path, decision: f.decision_path, playtest_plan: plan || 'not written', docs, doc_issues: docIssues }
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the spec ships without being designed again.
+phase('Handoff')
+const hand = await agent(`Hand off the design of "${feature}". If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the spec ${f.spec_path}, the decision record ${f.decision_path || '(as written)'}, the playtest plan ${plan ? '(' + plan + ')' : '(not written)'} and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or spec check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return `design-feature: blocked; ${hand && hand.problem ? hand.problem : 'handoff step returned nothing; the spec and docs may be uncommitted'}`
+if (!hand.tests_pass) return `design-feature: blocked; checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`
+
+return {
+  status: 'done', feature, spec: f.spec_path, decision: f.decision_path, playtest_plan: plan || 'not written', docs, doc_issues: docIssues,
+  handoff: {
+    from: 'game-designer:design-feature',
+    branch: hand.branch,
+    pr: hand.pr || '',
+    head_sha: hand.head_sha || '',
+    tests_pass: true,
+    docs: [f.spec_path, f.decision_path, ...(docs.pages || [])].filter((d, i, all) => d && all.indexOf(d) === i),
+    undocumented: docs.undocumented || [],
+    notes: [...(plan ? [] : ['playtest plan not written']), ...docIssues.map(d => 'docs check: ' + d)],
+  },
+  next: 'ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }',
+}
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)

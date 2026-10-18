@@ -29,7 +29,12 @@ reviewed, implementable spec with a playtest plan and its docs, using the
 4. If the result says **blocked**, read the open gaps. Settle the design
    questions yourself or mark them **[open]** with an owner, then rerun.
 5. On success, review the returned spec, decision record and playtest plan
-   paths, then commit them in the same pull request as any data changes.
+   paths, then ship it: pass the whole result as `prior` to
+   `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
+   for a work package, or land the branch with
+   `/engineering-practices:land-pr { branch: "<handoff.branch>" }` otherwise.
+   The workflow has already committed and pushed them on `handoff.branch`;
+   do not rebuild it.
 6. Hand the rule IDs listed in the hand-off note to the gameplay programmer.
 
 ## If you only want a spec quickly

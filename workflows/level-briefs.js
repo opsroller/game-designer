@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'level-briefs',
-  description: 'Write the briefs for a set of levels or content units from the progression and design docs: order the ideas, give each unit its idea, feeling, duration, target success rate and takeaway in the shape author-level checks for, check the set with a reviewer who did not write it, revise, write the briefs and document them. Use before author-level when a sequence of units has no finished briefs. args: { units: ["<unit id>", ...] (optional: default every unit in the progression without a finished brief), progression: "<progression page, optional>", design: "<design docs or spec pages, optional>", output: "<where briefs go, optional>" }',
+  description: 'Write the briefs for a set of levels or content units from the progression and design docs: order the ideas, give each unit its idea, feeling, duration, target success rate and takeaway in the shape author-level checks for, check the set with a reviewer who did not write it, revise and re-check up to three rounds, write the briefs and document them in the shape of the project\'s own progression table. Use before author-level when a sequence of units has no finished briefs. args: { units: ["<unit id>", ...] (optional: default every unit in the progression without a finished brief), progression: "<progression page, optional>", design: "<design docs or spec pages, optional>", output: "<where briefs go, optional>" }',
   phases: [
     { title: 'Plan', detail: 'units, idea inventory and dependencies, brief format and location, targets, doc kinds via the compass' },
     { title: 'Sequence', detail: 'one new idea per unit, arc role, difficulty and levers across the set' },
     { title: 'Draft', detail: 'one agent per unit, brief returned, not written' },
     { title: 'Check', detail: 'independent read of the whole set against the sequence rules and brief completeness' },
-    { title: 'Revise', detail: 'redraft only flagged units, up to two rounds' },
+    { title: 'Revise', detail: 'revise the briefs (and the sequence, for set findings) against the findings, then a fresh read-only re-check; up to three checks and two revisions' },
     { title: 'Write', detail: 'briefs into the project\'s brief location and format' },
-    { title: 'Docs', detail: 'progression table rows and the order\'s rationale' },
+    { title: 'Docs', detail: 'progression table rows in the shape of the project\'s existing table, and the order\'s rationale' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Handoff', detail: 'commit and push the briefs and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -149,9 +150,17 @@ const CHECK = { type: 'object', properties: {
   }, required: ['unit', 'problem'] } },
   set_findings: { type: 'array', items: { type: 'string' } },
 }, required: ['findings', 'set_findings'] }
+const REVISED = { type: 'object', properties: {
+  briefs: { type: 'array', items: BRIEF },
+  table: { type: 'string' },
+  rows: SEQ.properties.rows,
+  design_gaps: { type: 'array', items: { type: 'string' } },
+}, required: ['briefs', 'design_gaps'] }
 const WRITE = { type: 'object', properties: {
   written: { type: 'array', items: { type: 'object', properties: { unit: { type: 'string' }, path: { type: 'string' } }, required: ['unit', 'path'] } },
 }, required: ['written'] }
+const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
 const ISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
 
 phase('Plan')
@@ -175,8 +184,8 @@ For each unit give: the one idea it is about, its role in that idea's arc (intro
 if (!sq) return 'level-briefs: sequencing failed; nothing written.'
 if ((sq.problems || []).length) return { status: 'blocked', reason: 'the set breaks the progression rules', problems: sq.problems, sequence: sq.table, next: 'change the unit count or the idea order in the design docs, then run again' }
 
-const draftPrompt = (row, fix) => `Following the game-designer level-design skill ("Designing one level", step 1), write the brief for unit ${row.unit}. Its place in the set: ${JSON.stringify(row)}. Whole sequence:\n${sq.table}
-Give the five points author-level checks for: ${FIVE}. Make them concrete and checkable: the duration as a time or move range, the success rate as a number matching ${p.targets || 'the set\'s relative difficulty'} for this unit's place, the feeling as one or two words a playtester could confirm, the takeaway as a sentence starting "The player knows". Also give its role, levers, first_contact (where the player first meets the idea and why it is safe; for a test or rest unit, which earlier ideas it mixes) and notes for the author (anything the data must do, never a layout). Use only the project's own design, never another game's level data.${fix ? `\nThis is a redraft. Fix: ${fix}` : ''} Do not edit files.`
+const draftPrompt = (row) => `Following the game-designer level-design skill ("Designing one level", step 1), write the brief for unit ${row.unit}. Its place in the set: ${JSON.stringify(row)}. Whole sequence:\n${sq.table}
+Give the five points author-level checks for: ${FIVE}. Make them concrete and checkable: the duration as a time or move range, the success rate as a number matching ${p.targets || 'the set\'s relative difficulty'} for this unit's place, the feeling as one or two words a playtester could confirm, the takeaway as a sentence starting "The player knows". Also give its role, levers, first_contact (where the player first meets the idea and why it is safe; for a test or rest unit, which earlier ideas it mixes) and notes for the author (anything the data must do, never a layout). Use only the project's own design, never another game's level data. Do not edit files.`
 
 phase('Draft')
 const rows = sq.rows.filter(r => p.units.includes(r.unit))
@@ -188,8 +197,13 @@ rows.forEach((r, i) => { if (drafted[i]) briefs[r.unit] = drafted[i] })
 const failed = rows.filter(r => !briefs[r.unit]).map(r => r.unit)
 if (failed.length) return { status: 'blocked', reason: 'some briefs did not draft', units: failed, sequence: sq.table }
 
+// Check, revise, re-check: the check only reads, so it stays independent of
+// the briefs it judges; the revision is its own step, followed by a fresh check.
+const label = f => typeof f === 'string' ? f : `${f.unit}: ${f.problem}`
+let table = sq.table
 let open = []
 let setOpen = []
+let gaps = []
 for (let round = 1; round <= 3; round++) {
   if (round === 1) phase('Check')
   const c = await agent(`You did not write these briefs and must not assume their intent beyond them and the design docs (${design}). Following the game-designer level-design skill, check the set as author-level and a first-time player would:
@@ -197,34 +211,39 @@ for (let round = 1; round <= 3; round++) {
 - each unit has one new idea at most, and no idea appears before the ideas it needs (${JSON.stringify(p.ideas)});
 - introductions are safe, the curve has rests after spikes and never two maximum spikes in a row, and success rates fall where ${p.targets || 'the relative difficulty'} says they should;
 - no two units do the same job (each teaches, tests or lets the player express something the others do not).
-Sequence:\n${sq.table}\nBriefs: ${JSON.stringify(briefs)}
-Return findings per unit (unit, problem) and set_findings for problems that no single brief can fix. Do not edit files.`, { schema: CHECK, phase: round === 1 ? 'Check' : 'Revise', label: `check:${round}`, independent: true })
-  if (!c) { open = [{ unit: '*', problem: 'brief check did not return; the set is unverified' }]; break }
+Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}
+Return findings per unit (unit, problem) and set_findings for problems that no single brief can fix. Read-only: this check must change no files; do not edit files.`, { schema: CHECK, phase: round === 1 ? 'Check' : 'Revise', label: `check:${round}`, independent: true })
+  if (!c) { open = [{ unit: '*', problem: 'brief check did not return; the set is unverified' }]; setOpen = []; break }
   open = c.findings || []
   setOpen = c.set_findings || []
-  if (setOpen.length) break
-  if (!open.length) break
-  log(`round ${round}: ${open.length} findings`)
+  if (!open.length && !setOpen.length) break
+  log(`round ${round}: ${open.length + setOpen.length} findings`)
   if (round === 3) break
   phase('Revise')
-  const flagged = rows.filter(r => open.some(f => f.unit === r.unit))
-  const redone = await pipeline(flagged, r => agent(draftPrompt(r, open.filter(f => f.unit === r.unit).map(f => f.problem).join('; ')), { schema: BRIEF, phase: 'Revise', label: `redraft:${r.unit}:${round}` }))
-  flagged.forEach((r, i) => { if (redone[i]) briefs[r.unit] = redone[i] })
+  const rv = await agent(`Following the game-designer level-design skill (progression steps 2-5 and "Designing one level", step 1), revise this set of briefs so it closes every finding below. Keep the unit list and play order (${rows.map(r => r.unit).join(', ')}); you may change any brief's five points, role, levers, first contact and notes, and, for set findings, the roles, difficulties and levers in the sequence. Keep the rules: at most one new idea per unit, no idea before the ideas it needs, safe introductions, a rest after each spike. Use only the project's own design (${design}), never another game's level data. If a finding can only be closed by changing the design docs or the unit count, leave it and list it in design_gaps.
+Unit findings:\n- ${open.map(label).join('\n- ') || 'none'}
+Set findings:\n- ${setOpen.join('\n- ') || 'none'}
+Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}
+Return briefs: the full revised brief of every unit you changed, with all five points; table: the revised sequence as a markdown table (the current one if unchanged); rows: the revised sequence rows, only if they changed; design_gaps. The Write step writes the briefs to files, so do not edit files here.`, { schema: REVISED, phase: 'Revise', label: `revise:${round}` })
+  if (!rv) return { status: 'blocked', reason: `revision ${round} returned nothing`, findings: open.map(label), set_findings: setOpen, sequence: table, briefs }
+  ;(rv.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b })
+  if (rv.table) table = rv.table
+  if (Array.isArray(rv.rows) && rv.rows.length && rows.every(r => rv.rows.some(x => x.unit === r.unit))) rows.splice(0, rows.length, ...rows.map(r => rv.rows.find(x => x.unit === r.unit)))
+  gaps = rv.design_gaps || []
 }
-if (setOpen.length) return { status: 'blocked', reason: 'the set needs a sequence or design change', findings: setOpen, sequence: sq.table, briefs }
-if (open.length) return { status: 'blocked', reason: 'briefs still open after two revisions', findings: open, sequence: sq.table, briefs }
+if (open.length || setOpen.length) return { status: 'blocked', reason: open.some(f => f.unit === '*') ? 'the brief check did not return' : 'findings remain after the last check (three checks, two revisions)', findings: open.map(label), set_findings: setOpen, design_gaps: gaps, sequence: table, briefs, next: setOpen.length || gaps.length ? 'change the unit count or the idea order in the design docs, then run again' : 'revise the named briefs by hand or run again' }
 
 phase('Write')
 const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in the project's brief format (${p.brief_format}${p.example ? `, shaped like ${p.example}` : ''}). Label the five points so author-level finds them: Idea, Feeling, Duration, Target success rate, Takeaway (what the player knows afterwards); add role, levers, first contact and notes below them. Edit briefs only: no level data, no targets, no other unit's finished brief. Keep any license header the project requires on new files.\nBriefs: ${JSON.stringify(rows.map(r => briefs[r.unit]))}\nReturn each unit and the path (and heading, if several share a page) of its brief.`, { schema: WRITE, phase: 'Write', label: 'write' })
 if (!w) return { status: 'blocked', reason: 'writing briefs failed; inspect the working tree', briefs }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update each unit's row in the progression table (unit, idea, role, levers, target success rate, brief link), leaving the data file column empty until author-level fills it. Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${sq.table}\nBriefs written: ${JSON.stringify(w.written)}`, { phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. First read the project's existing progression or plan table (${progression}) and follow its shape: its columns and their order, its row order, its link style and its file. Add or update each unit's row in that shape, filling the columns it has from the briefs and leaving columns that author-level fills later (a data file, a seed) empty; do not add, drop or reorder its columns. Only when the project has no such table, create one with these columns: unit, idea, role, levers, target success rate, brief link, data file (empty until author-level fills it). Record why the ideas arrive in this order in the explanation page if the order is new or changed.\nSequence:\n${table}\nBriefs written: ${JSON.stringify(w.written)}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched for these briefs (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
+const docCheckPrompt = `Review the documentation pages touched for these briefs (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
 let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
 if (check && (check.issues || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
@@ -232,12 +251,32 @@ if (check && (check.issues || []).length) {
 }
 const docIssues = check ? check.issues : ['docs check did not run; docs unverified']
 
-return {
+const result = {
   status: !docs ? 'docs missing' : docIssues.length ? 'docs missing' : 'done',
   briefs: w.written,
-  sequence: sq.table,
+  sequence: table,
   docs: docs || 'docs step failed',
   doc_issues: docIssues,
   next: `The briefs and docs are written but not committed: land them with engineering-practices deliver-package or small-change. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`,
 }
+if (result.status !== 'done') return result
+
+// The handoff is what engineering-practices deliver-package takes as
+// prior, so the briefs ship without being written again.
+phase('Handoff')
+const briefPaths = [...new Set(w.written.map(b => b.path))]
+const hand = await agent(`Hand off the level briefs for ${rows.map(r => r.unit).join(', ')}. If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the briefs (${briefPaths.join(', ')}) and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or brief check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the briefs and docs may be uncommitted', briefs: w.written, sequence: table }
+if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, briefs: w.written, sequence: table }
+result.handoff = {
+  from: 'game-designer:level-briefs',
+  branch: hand.branch,
+  pr: hand.pr || '',
+  head_sha: hand.head_sha || '',
+  tests_pass: true,
+  docs: [...new Set([...briefPaths, ...(docs.pages || [])])],
+  undocumented: docs.undocumented || [],
+}
+result.next = `ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`
+return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)
