@@ -1,0 +1,47 @@
+# How to run a balance pass
+
+*How-to guide for designers tuning levels, encounters or an economy with the game-designer plugin.*
+
+This guide shows you how to check a set of content units against difficulty
+targets with simulated play, and apply the smallest fixes, using the
+`balance-pass` workflow.
+
+## Before you start
+
+- A balance targets reference page exists (success rate, margin, duration
+  per unit and difficulty). If not, write it first with the
+  `economy-balance` skill; the workflow stops without targets.
+- The project has a headless simulator, or a gameplay programmer can provide
+  one. The skill's simulation reference lists what it needs.
+
+## Steps
+
+1. Propose first, without editing data:
+
+   ```
+   /game-designer:balance-pass {"units": ["levels/area-1/01", "levels/area-1/02", "levels/area-1/03"], "targets": "docs/reference/balance-targets.md"}
+   ```
+
+   List units in play order; the curve check depends on it.
+2. Read the returned table: unit, current value, proposed change, reason.
+   Units marked `unverified` did not simulate; investigate before trusting
+   the curve around them.
+3. If the proposals look right, run again with `"apply": true`. One agent
+   edits only data files the project profile says the designer owns,
+   re-simulates, and lists files that belong to someone else.
+4. Playtest the changed units (see [How to run a playtest](how-to-run-a-playtest.md)).
+   Simulation confirms numbers, not feeling.
+5. Commit the data changes with the updated balance reference in one pull
+   request; put the simulation summary table in the PR description.
+
+## If results look implausible
+
+- If the random bot wins often, check the simulator loads the same data the
+  game does.
+- If the goal-aware bot fails everywhere, watch a replay for a rule bug
+  before tuning.
+
+## See also
+
+- [balance-pass workflow reference](../reference/workflow-balance-pass.md)
+- [economy-balance skill reference](../reference/skill-economy-balance.md)
