@@ -7,7 +7,7 @@
 | Name | `level-briefs` |
 | File | `workflows/level-briefs.js` |
 | Invocation | `/game-designer:level-briefs` |
-| Purpose | Write one brief per level or content unit for a set, from the progression and design docs, in the shape `author-level` checks for; check the set independently, revise and document it. |
+| Purpose | Write one brief per level or content unit for a set, from the progression and design docs, in the shape `author-level` checks for; check the set independently, revise and re-check it, and document it in the shape of the project's own progression table. |
 
 ## Arguments
 
@@ -41,10 +41,10 @@ Below them: role in the idea's arc (`introduce`, `develop`, `twist`,
 | Plan | 1 | no | Units in range and those already briefed; idea inventory with dependencies; brief location, ownership and format; targets; gaps; doc plan by Diataxis kind (docs Plan step). |
 | Sequence | 1 | no | Gives each unit one idea, an arc role, a 1-10 difficulty and levers; checks one new idea per unit, dependency order and the sawtooth curve. |
 | Draft | 1 per unit, parallel | no | Returns each unit's brief. |
-| Check | 1 per round | no | Independent: a reviewer who did not write the briefs checks completeness, idea order, curve, targets and that no two units do the same job. |
-| Revise | 1 per flagged unit per round | no | Redrafts only flagged units; up to two rounds, re-checking the whole set each time. |
+| Check | 1 | no | Independent and read-only (`check:1`): a reviewer who did not write the briefs checks completeness, idea order, curve, targets and that no two units do the same job. Returns unit findings and set findings. |
+| Revise | 1 revision, then 1 re-check, per round | no (the revision changes the briefs in the run; Write writes them) | On any finding, unit or set: a revision step (`revise:<round>`, not independent) changes the briefs, and for set findings the roles, difficulties and levers in the sequence, keeping the unit list and order; findings that need the design docs changed come back as `design_gaps`. A fresh independent, read-only check (`check:<round>`) then reads the whole set again. Up to three checks and two revisions. |
 | Write | 1 | briefs only | Writes the briefs in the project's format; no level data or targets. |
-| Docs | 1 | yes | Progression table rows with brief links; explanation if the order is new or changed (docs Do step). |
+| Docs | 1 | yes | Reads the project's existing progression or plan table first and adds each unit's row in its shape (its columns and their order, row order, link style, file), leaving columns `author-level` fills empty. Only when no table exists does it create one with the default columns: unit, idea, role, levers, target success rate, brief link, data file. Explanation if the order is new or changed (docs Do step). |
 | Docs check | 1 | fixes only | One kind per page, titles, links (docs Check step). |
 | Handoff | 1 | commits only | Commits the briefs and docs on a feature branch, pushes, runs the docs checks the profile names on the pushed head. Skipped when `status` is `docs missing`. Never opens or merges a PR. |
 
@@ -61,8 +61,9 @@ Object: `status` (`done`, `docs missing`, `blocked`), `briefs` (`unit`, `path`),
 | Design docs leave an idea or the unit count open | `{ status: 'blocked', gaps }`; settle them with `design-feature` or `design-spec` first |
 | The set breaks the progression rules | `{ status: 'blocked', problems, sequence }` |
 | The sequence leaves units out, or a draft returns nothing | `{ status: 'blocked' }` naming the units |
-| The check finds a problem no single brief can fix | `{ status: 'blocked', findings }` with the briefs |
-| Briefs still flagged after two revisions | `{ status: 'blocked', findings }` with the briefs |
+| A revision step returns nothing | `{ status: 'blocked', reason, findings, set_findings, sequence, briefs }` |
+| Findings remain after the third check (two revisions) | `{ status: 'blocked', reason, findings, set_findings, design_gaps, sequence, briefs, next }`: `findings` lists the open unit findings as `<unit>: <problem>`, `set_findings` the open set findings, `design_gaps` what the last revision said needs a design-doc change |
+| The brief check returns nothing | `{ status: 'blocked' }`; the set is unverified |
 | Write step returns nothing | `{ status: 'blocked' }`; inspect the working tree |
 | Handoff returns nothing or no branch, or the checks fail on the pushed head | `{ status: 'blocked', reason, briefs, sequence }` naming the problem |
 
@@ -86,6 +87,6 @@ Run modes v2. Besides its own args, the workflow takes the optional `run` arg de
 and `run.from` with `run.results` resumes a stopped run. Without `run`, the workflow and its outputs are as above.
 See [how to run a workflow inline](https://github.com/opsroller/engineering-practices/blob/main/docs/how-to/how-to-run-a-workflow-inline.md).
 
-Step labels, for `run.only` and `run.results`: `plan`, `sequence`, `draft:<unit>`, `check:<round>`, `redraft:<unit>:<round>`, `write`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent), `handoff`.
+Step labels, for `run.only` and `run.results`: `plan`, `sequence`, `draft:<unit>`, `check:1`, then per round while findings remain `revise:1`, `check:2`, `revise:2`, `check:3`, `write`, `docs`, `docs-check`, `docs-fix` and `docs-recheck` (only when the docs check finds problems; the check is read-only, the fix is not independent), `handoff`.
 
-Independent steps: every `check:<round>` step, and `docs-check`, `docs-recheck`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not write the briefs (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.
+Independent steps: every `check:<round>` step (read-only; each prompt says it changes no files), and `docs-check`, `docs-recheck`. The `revise:<round>` steps are not independent: they change the briefs. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not write the briefs (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.

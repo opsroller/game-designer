@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'author-level',
-  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, check it against the brief with a fresh reviewer and the simulator, revise, and document it. Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" }',
+  description: 'Turn an already-designed level or content brief into a data file in the project\'s format, validate it with the project\'s schema or loader, check it against the brief with a fresh reviewer and the simulator, revise, and document it. Takes one brief, or a set of briefs authored together (each unit planned, authored, validated and brief-checked on its own, the simulation run once over the set, one docs pass and one handoff). Use when the design is settled and the content must be built. args: { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" } or { briefs: ["<brief page or text>", ...] (in play order; replaces brief), output: "<data directory, optional>", sequence: "<progression page, optional>" }',
   phases: [
-    { title: 'Plan', detail: 'brief complete, format, validator, simulator, owned path, doc kinds via the compass' },
-    { title: 'Author', detail: 'critical path first, data only, fixed seed' },
-    { title: 'Validate', detail: 'schema or parser, then load; fix until clean' },
-    { title: 'Check', detail: 'fresh read against the brief and simulation, in parallel' },
+    { title: 'Plan', detail: 'brief complete, format, validator, simulator, owned path, doc kinds via the compass; per unit in a set' },
+    { title: 'Author', detail: 'critical path first, data only, fixed seed; per unit in a set' },
+    { title: 'Validate', detail: 'schema or parser, then load; fix until clean; per unit in a set' },
+    { title: 'Check', detail: 'fresh read against the brief (per unit) and simulation (once over a set), in parallel' },
     { title: 'Revise', detail: 'smallest data change per finding, re-validate, up to two rounds' },
-    { title: 'Docs', detail: 'progression entry and any format or procedure change' },
+    { title: 'Docs', detail: 'progression entries and any format or procedure change, once for a set' },
     { title: 'Docs check', detail: 'one kind per page, titles, links' },
-    { title: 'Handoff', detail: 'commit and push the data file and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
+    { title: 'Handoff', detail: 'commit and push the data file (or the set\'s files) and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
 
@@ -106,9 +106,19 @@ if (RUN.error) return RUN.error
 const RUN_OUT = await Promise.race([RUN.halted, (async (agent, phase, log) => {
 // --- run-modes v2 end (workflow body follows; close it with the tail line) ---
 
+// One brief, or a set of briefs (briefs: [...]) authored together. A set
+// runs plan, author and validate per unit (labels end in the unit's
+// 1-based number), the brief check per unit, the simulation once over the
+// whole set, and docs and the handoff once.
+const set = args && Array.isArray(args.briefs) && args.briefs.length ? args.briefs.map(String) : null
 const brief = args && args.brief
-if (!brief) return 'Usage: author-level with args { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" }'
+if (!brief && !set) return 'Usage: author-level with args { brief: "<brief page or the brief text>", output: "<data file path, optional>", sequence: "<progression page, optional>" }, or { briefs: ["<brief page or text>", ...], output: "<data directory, optional>", sequence: "<progression page, optional>" } to author a set in play order'
+const batch = !!set
+const list = batch ? set : [brief]
+const all = list.map((_, i) => i)
+const tag = (base, i) => batch ? `${base}:${i + 1}` : base
 const output = (args && args.output) || 'the path the project profile gives for level or content data, one file per unit'
+const outputOf = (i) => batch ? `${output}; one file per unit, this is unit ${i + 1} of ${list.length} in a set authored together in play order` : output
 const sequence = (args && args.sequence) || 'the progression table in the project design docs, if one exists'
 
 const DOCS_FRAGMENT = 'Classify every user-visible change in this work with the Diataxis compass (action/cognition x study/work). For each, update or add exactly one page of that kind under the project\'s docs/<kind>/ (per its profile), keep each page to one kind, title it by the project pattern, and link to the related pages of the other kinds. Report pages touched and any change you left undocumented and why.'
@@ -129,101 +139,178 @@ const VALID = { type: 'object', properties: {
   ok: { type: 'boolean' }, ran: { type: 'array', items: { type: 'string' } },
   errors: { type: 'array', items: { type: 'string' } },
 }, required: ['ok', 'ran', 'errors'] }
+const VERDICT = { type: 'string', enum: ['matches brief', 'off brief', 'too easy', 'on target', 'too hard', 'not run'] }
 const FINDINGS = { type: 'object', properties: {
-  verdict: { type: 'string', enum: ['matches brief', 'off brief', 'too easy', 'on target', 'too hard', 'not run'] },
+  verdict: VERDICT,
   findings: { type: 'array', items: { type: 'string' } }, table: { type: 'string' },
 }, required: ['verdict', 'findings'] }
+// The simulation over a set: one entry per file, in the order given.
+const SIM_SET = { type: 'object', properties: {
+  verdict: VERDICT,
+  findings: { type: 'array', items: { type: 'string' } }, table: { type: 'string' },
+  per_file: { type: 'array', items: { type: 'object', properties: {
+    file: { type: 'string' }, verdict: VERDICT, findings: { type: 'array', items: { type: 'string' } },
+  }, required: ['file', 'verdict', 'findings'] } },
+}, required: ['verdict', 'findings', 'per_file'] }
 
-phase('Plan')
-const p = await agent(`You are the game designer. Following the game-designer level-design skill, read this brief and the project profile, design docs and existing level or content data. Brief: ${brief}
+const planPrompt = (b, i) => `You are the game designer. Following the game-designer level-design skill, read this brief and the project profile, design docs and existing level or content data. Brief: ${b}
 Do not design anything new and do not edit files. Report:
 - brief_complete: the brief states the idea it teaches or tests, the intended feeling, target duration, target success rate and what the player knows afterwards; list anything missing in brief_missing. A layout sketch or critical path is welcome but not required.
 - brief_summary: those five points in one line each.
-- output_path: where the data file goes (${output}); owned: whether the project profile gives the game designer that path.
+- output_path: where the data file goes (${outputOf(i)}); owned: whether the project profile gives the game designer that path.
 - format: the data format and its schema, parser or loader (file and symbol), and example: the path of the closest existing data file to copy the shape from.
 - validate_cmd: the command that checks a data file against its schema or parser without the full game (empty if none exists); load_cmd: the command or test that loads it in the build or a headless run (empty if none).
 - simulator: the command that plays the content headless with bots (empty if none); targets: the balance targets page for this unit (empty if none).
 - sequence_issues: read ${sequence}; list breaks of the progression rules if this unit goes where the brief says (more than one new idea, an idea used before it is taught, two maximum spikes in a row). Empty if fine or no table exists.
-- doc_plan: Diataxis kind and page for each doc this change touches (the progression table and data format are reference; why the order is so is explanation; how to add a level is how-to, only if the procedure changes).`, { schema: PLAN, phase: 'Plan', label: 'plan' })
-if (!p) return 'author-level: planning failed; nothing written.'
-if (!p.brief_complete) return `author-level: blocked; the brief is not finished. Missing:\n- ${(p.brief_missing || []).join('\n- ')}\nFinish it with the level-design skill (or the design-feature workflow for a new mechanic) first.`
-if (!p.owned) return `author-level: blocked; ${p.output_path} is not a path the project profile gives the game designer. Hand the brief to its owner or get the profile changed.`
-if (!p.format) return 'author-level: blocked; no level or content data format found. A gameplay programmer must define the format and its loader first (data, not code).'
+- doc_plan: Diataxis kind and page for each doc this change touches (the progression table and data format are reference; why the order is so is explanation; how to add a level is how-to, only if the procedure changes).`
+
+phase('Plan')
+const plans = await parallel(list.map((b, i) => () => agent(planPrompt(b, i), { schema: PLAN, phase: 'Plan', label: tag('plan', i) })))
+if (!batch) {
+  const p = plans[0]
+  if (!p) return 'author-level: planning failed; nothing written.'
+  if (!p.brief_complete) return `author-level: blocked; the brief is not finished. Missing:\n- ${(p.brief_missing || []).join('\n- ')}\nFinish it with the level-design skill (or the design-feature workflow for a new mechanic) first.`
+  if (!p.owned) return `author-level: blocked; ${p.output_path} is not a path the project profile gives the game designer. Hand the brief to its owner or get the profile changed.`
+  if (!p.format) return 'author-level: blocked; no level or content data format found. A gameplay programmer must define the format and its loader first (data, not code).'
+} else {
+  const notReady = (p) => !p ? 'planning failed'
+    : !p.brief_complete ? `the brief is not finished; missing: ${(p.brief_missing || []).join('; ') || 'unstated'}`
+    : !p.owned ? `${p.output_path} is not a path the project profile gives the game designer`
+    : !p.format ? 'no level or content data format found; a gameplay programmer defines the format and its loader first'
+    : null
+  const bad = all.map(i => ({ unit: i + 1, brief: list[i], problem: notReady(plans[i]) })).filter(u => u.problem)
+  if (bad.length) return { status: 'blocked', reason: 'some units in the set are not ready to author; nothing written', units: bad, next: 'finish those briefs (level-briefs or the level-design skill), get the paths owned or the format defined, then run again' }
+}
+const files = plans.map(p => p.output_path)
+const shared = files.filter((f, i) => files.indexOf(f) !== i)
+if (shared.length) log(`more than one unit planned for ${[...new Set(shared)].join(', ')}; check the units do not overwrite each other`)
+const fileList = files.join(', ')
 
 phase('Author')
-const written = await agent(`Following the game-designer level-design skill ("Designing one level"), build this unit as data at ${p.output_path} in the project's format (${p.format}), shaped like ${p.example || 'the format reference'}. Brief:\n${p.brief_summary}\nFull brief: ${brief}
-Rules: lay the critical path first, then alternatives, secrets and rests; put the goal, or a lead toward it, where the player sees it early; make first contact with the new idea safe; give any randomness a fixed, recorded seed; write data only (no code, no new fields the format does not define: if the brief needs one, stop and list it for the format's owner); use only the project's own content, never another game's level data. Return the path written and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { phase: 'Author', label: 'author' })
-if (!written) return 'author-level: authoring failed; inspect the working tree.'
+const wrote = await parallel(plans.map((p, i) => () => agent(`Following the game-designer level-design skill ("Designing one level"), build this unit as data at ${p.output_path} in the project's format (${p.format}), shaped like ${p.example || 'the format reference'}. Brief:\n${p.brief_summary}\nFull brief: ${list[i]}
+Rules: lay the critical path first, then alternatives, secrets and rests; put the goal, or a lead toward it, where the player sees it early; make first contact with the new idea safe; give any randomness a fixed, recorded seed; write data only (no code, no new fields the format does not define: if the brief needs one, stop and list it for the format's owner); use only the project's own content, never another game's level data.${batch ? ` Write only ${p.output_path}; the other units of the set are authored by their own steps.` : ''} Return the path written and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { phase: 'Author', label: tag('author', i) })))
+if (!batch && !wrote[0]) return 'author-level: authoring failed; inspect the working tree.'
+const unwritten = all.filter(i => !wrote[i])
+if (unwritten.length) return { status: 'blocked', reason: 'authoring failed for some units; inspect the working tree', files: unwritten.map(i => files[i]) }
 
-const cmds = [p.validate_cmd, p.load_cmd].filter(Boolean)
-const missing = [!p.validate_cmd && 'no schema or parser validator', !p.load_cmd && 'no loader or load test'].filter(Boolean)
-const validate = (round) => cmds.length
-  ? agent(`Validate ${p.output_path}. Run, in order: ${cmds.join(', then ')}. If a command fails on this file, fix the data (never the validator, loader or tests: those belong to their owners) and run it again, up to three times. Return ok only if every listed command ran and passed, the commands run, and errors still open.`, { schema: VALID, phase: 'Validate', label: `validate:${round}` })
-  : Promise.resolve({ ok: true, ran: [], errors: [] })
+const cmdsOf = (p) => [p.validate_cmd, p.load_cmd].filter(Boolean)
+const missingOf = (p) => [!p.validate_cmd && 'no schema or parser validator', !p.load_cmd && 'no loader or load test'].filter(Boolean)
+const validate = (i, round) => {
+  const p = plans[i]
+  const cmds = cmdsOf(p)
+  return cmds.length
+    ? agent(`Validate ${p.output_path}. Run, in order: ${cmds.join(', then ')}. If a command fails on this file, fix the data (never the validator, loader or tests: those belong to their owners) and run it again, up to three times. Return ok only if every listed command ran and passed, the commands run, and errors still open.`, { schema: VALID, phase: 'Validate', label: batch ? `validate:${i + 1}:${round}` : `validate:${round}` })
+    : Promise.resolve({ ok: true, ran: [], errors: [] })
+}
+// Returns the blocked result when any of these units failed validation.
+const invalid = (units, after) => {
+  const bad = units.filter(i => !vs[i] || !vs[i].ok)
+  if (!bad.length) return null
+  if (!batch) return !vs[0]
+    ? { status: 'blocked', reason: after ? 'validation step did not return after revision' : 'validation step did not return', file: files[0] }
+    : { status: 'blocked', reason: after ? 'revision broke validation' : 'data does not validate', file: files[0], errors: vs[0].errors }
+  return { status: 'blocked', reason: after ? 'revision broke validation' : 'data does not validate', units: bad.map(i => ({ file: files[i], problem: vs[i] ? 'does not validate' : 'validation step did not return', errors: vs[i] ? vs[i].errors : [] })) }
+}
 
 phase('Validate')
-if (missing.length) log(`${missing.join(' and ')}; listed as unverified for the gameplay programmer`)
-let v = await validate(0)
-if (!v) return { status: 'blocked', reason: 'validation step did not return', file: p.output_path }
-if (!v.ok) return { status: 'blocked', reason: 'data does not validate', file: p.output_path, errors: v.errors }
+const missingAll = [...new Set(plans.flatMap(missingOf))]
+if (missingAll.length) log(`${missingAll.join(' and ')}; listed as unverified for the gameplay programmer`)
+const vs = await parallel(all.map(i => () => validate(i, 0)))
+const notValid = invalid(all, false)
+if (notValid) return notValid
 
-const checks = [
-  ['brief', () => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${p.output_path} and this brief:\n${p.brief_summary}
-Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: it teaches or tests only the brief's idea; that idea's first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief's levers, not from obscurity (hidden rules, unreadable space). Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: 'check:brief', independent: true })],
-  ['sim', () => p.simulator
-    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${p.simulator} on ${p.output_path} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${p.targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: 'check:sim', independent: true })
-    : Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })],
-]
+const simulator = (plans.find(p => p.simulator) || {}).simulator || ''
+// A re-check after a revision gets its own label: recheck:brief:<round>
+// (recheck:brief:<unit>:<round> in a set) and recheck:sim:<round>.
+const briefCheck = (i, round) => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${files[i]} and this brief:\n${plans[i].brief_summary}
+Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: it teaches or tests only the brief's idea; that idea's first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief's levers, not from obscurity (hidden rules, unreadable space). Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: round ? (batch ? `recheck:brief:${i + 1}:${round}` : `recheck:brief:${round}`) : tag('check:brief', i), independent: true })
+const simCheck = (round) => !simulator
+  ? Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })
+  : !batch
+    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${simulator} on ${files[0]} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${plans[0].targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: round ? `recheck:sim:${round}` : 'check:sim', independent: true })
+    : agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${simulator} once over this whole set, in play order: ${fileList}. Play every file for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds, and compare each with its targets (${plans.map(p => `${p.output_path}: ${p.targets || 'its brief\'s target success rate and duration'}`).join('; ')}), and the set with the curve the progression expects. Do not edit files. Return the summary table as markdown (one row per file and difficulty), a verdict and findings for the set as a whole, and per_file: one entry per file in the order given, each with its verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: SIM_SET, phase: 'Check', label: round ? `recheck:sim:${round}` : 'check:sim', independent: true })
 
 const failing = { brief: c => c.verdict === 'off brief', sim: c => ['too easy', 'too hard'].includes(c.verdict) }
-const results = {}
-let pending = checks
+const briefRes = []
+let sim
+// The simulation's answer for one unit: the whole answer for one brief,
+// that file's entry for a set.
+const simOf = (i) => !batch ? sim
+  : !simulator ? { verdict: 'not run', findings: [] }
+  : (sim.per_file || [])[i] || { verdict: 'not run', findings: [`simulation returned no result for ${files[i]}; unverified`] }
+let pendingBrief = all
+let simPending = true
 for (let round = 0; round <= 2; round++) {
   if (round === 0) phase('Check')
-  const r = await parallel(pending.map(([, run]) => run))
-  pending.forEach(([name], i) => { results[name] = r[i] || { verdict: 'not run', findings: [`${name} check did not return; unverified`] } })
-  pending = checks.filter(([name]) => failing[name](results[name]))
-  const open = pending.flatMap(([name]) => results[name].findings)
+  const r = await parallel([...pendingBrief.map(i => () => briefCheck(i, round)), ...(simPending ? [() => simCheck(round)] : [])])
+  pendingBrief.forEach((i, k) => { briefRes[i] = r[k] || { verdict: 'not run', findings: ['brief check did not return; unverified'] } })
+  if (simPending) sim = r[pendingBrief.length] || { verdict: 'not run', findings: ['sim check did not return; unverified'] }
+  pendingBrief = all.filter(i => failing.brief(briefRes[i]))
+  const simFail = all.filter(i => failing.sim(simOf(i)))
+  simPending = simFail.length > 0
+  const openOf = (i) => [...(pendingBrief.includes(i) ? briefRes[i].findings : []), ...(simFail.includes(i) ? simOf(i).findings : [])]
+  const todo = all.filter(i => openOf(i).length)
+  const open = batch ? todo.flatMap(i => openOf(i).map(f => `${files[i]}: ${f}`)) : openOf(0)
   if (!open.length) break
   log(`round ${round}: ${open.length} findings`)
-  if (round === 2) return { status: 'blocked', reason: 'still off brief or off target after two revisions', file: p.output_path, findings: open, simulation: results.sim.table || '' }
+  if (round === 2) return batch
+    ? { status: 'blocked', reason: 'still off brief or off target after two revisions', files: todo.map(i => files[i]), findings: open, simulation: sim.table || '' }
+    : { status: 'blocked', reason: 'still off brief or off target after two revisions', file: files[0], findings: open, simulation: sim.table || '' }
   phase('Revise')
-  const fixed = await agent(`Following the game-designer level-design skill's decision rules (fix readability before numbers; add thinking before speed; one variable per change where possible), make the smallest data change to ${p.output_path} that closes these findings. Data only; the brief stays as it is. If a finding needs the brief itself to change, do not edit: say so.\n- ${open.join('\n- ')}\nReturn what changed.`, { phase: 'Revise', label: `revise:${round + 1}` })
-  if (!fixed) return { status: 'blocked', reason: 'revision failed', file: p.output_path, findings: open }
-  v = await validate(round + 1)
-  if (!v) return { status: 'blocked', reason: 'validation step did not return after revision', file: p.output_path }
-  if (!v.ok) return { status: 'blocked', reason: 'revision broke validation', file: p.output_path, errors: v.errors }
+  const fixed = await parallel(todo.map(i => () => agent(`Following the game-designer level-design skill's decision rules (fix readability before numbers; add thinking before speed; one variable per change where possible), make the smallest data change to ${files[i]} that closes these findings. Data only; the brief stays as it is. If a finding needs the brief itself to change, do not edit: say so.\n- ${openOf(i).join('\n- ')}\nReturn what changed.`, { phase: 'Revise', label: batch ? `revise:${i + 1}:${round + 1}` : `revise:${round + 1}` })))
+  const unfixed = todo.filter((i, k) => !fixed[k])
+  if (unfixed.length) return batch
+    ? { status: 'blocked', reason: 'revision failed', files: unfixed.map(i => files[i]), findings: open }
+    : { status: 'blocked', reason: 'revision failed', file: files[0], findings: open }
+  const rv = await parallel(todo.map(i => () => validate(i, round + 1)))
+  todo.forEach((i, k) => { vs[i] = rv[k] })
+  const broke = invalid(todo, true)
+  if (broke) return broke
 }
-const brief_check = results.brief
-const sim = results.sim
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update this unit's row in the progression table (unit, idea, levers, target success rate, file), recording ${p.output_path} and its seed. Update the data format reference only if the format changed, the how-to for adding a level only if the procedure changed, and the explanation only if the order or curve changed.${sim && sim.table ? `\nLatest simulation table:\n${sim.table}` : ''}\nProgression issues found at planning: ${JSON.stringify(p.sequence_issues || [])}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
-if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the change is not done until its docs are written' }
+const docPlan = batch ? plans.flatMap(p => p.doc_plan || []) : plans[0].doc_plan
+const seqIssues = batch ? plans.flatMap((p, i) => (p.sequence_issues || []).map(s => `${files[i]}: ${s}`)) : plans[0].sequence_issues || []
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(docPlan)}. ${batch ? `Add or update each unit's row in the progression table (unit, idea, levers, target success rate, file), recording each file (${fileList}) and its seed.` : `Add or update this unit's row in the progression table (unit, idea, levers, target success rate, file), recording ${files[0]} and its seed.`} Update the data format reference only if the format changed, the how-to for adding a level only if the procedure changed, and the explanation only if the order or curve changed.${sim && sim.table ? `\nLatest simulation table:\n${sim.table}` : ''}\nProgression issues found at planning: ${JSON.stringify(seqIssues)}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
+if (!docs) return batch
+  ? { status: 'docs missing', files, reason: 'the change is not done until its docs are written' }
+  : { status: 'docs missing', file: files[0], reason: 'the change is not done until its docs are written' }
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
 // fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched for ${p.output_path} (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
+const docCheckPrompt = `Review the documentation pages touched for ${fileList} (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Read-only: do not edit anything; return every issue as findings, with verdict "not run" when there are any.`
 let check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
 if (check && (check.findings || []).length) {
   const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.findings.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
   if (docFix) check = await agent(docCheckPrompt, { schema: FINDINGS, phase: 'Docs check', label: 'docs-recheck', independent: true })
 }
 
-const unverified = missing.map(m => `${m}: file not fully machine-checked`)
+const prefix = (i, m) => batch ? `${files[i]}: ${m}` : m
+const unverified = all.flatMap(i => missingOf(plans[i]).map(m => prefix(i, `${m}: file not fully machine-checked`)))
 if (sim.verdict === 'not run') unverified.push(...sim.findings)
-if (brief_check.verdict === 'not run') unverified.push(...brief_check.findings)
+if (batch && simulator) all.forEach(i => { if (simOf(i).verdict === 'not run') unverified.push(...simOf(i).findings.map(f => prefix(i, f))) })
+all.forEach(i => { if (briefRes[i].verdict === 'not run') unverified.push(...briefRes[i].findings.map(f => prefix(i, f))) })
 
 const docIssues = check ? check.findings : ['docs check did not run; docs unverified']
+const status = docIssues.length ? 'docs missing' : unverified.length ? 'incomplete' : 'done'
 
-const result = {
-  status: docIssues.length ? 'docs missing' : unverified.length ? 'incomplete' : 'done',
-  file: p.output_path,
-  validation: v,
-  brief_check: brief_check.findings,
+const result = batch ? {
+  status,
+  files,
+  units: all.map(i => ({ file: files[i], validation: vs[i], brief_check: briefRes[i].findings, sequence_issues: plans[i].sequence_issues || [] })),
   simulation: sim.table || sim.verdict,
-  sequence_issues: p.sequence_issues || [],
+  unverified,
+  next: 'playtest the units with players who have not seen them (game-designer playtesting skill); simulation confirms numbers, not feeling',
+  docs,
+  doc_issues: docIssues,
+} : {
+  status,
+  file: files[0],
+  validation: vs[0],
+  brief_check: briefRes[0].findings,
+  simulation: sim.table || sim.verdict,
+  sequence_issues: plans[0].sequence_issues || [],
   unverified,
   next: 'playtest the unit with players who have not seen it (game-designer playtesting skill); simulation confirms numbers, not feeling',
   docs,
@@ -232,11 +319,13 @@ const result = {
 if (docIssues.length) return result
 
 // The handoff is what engineering-practices deliver-package takes as
-// prior, so the unit ships without being authored again.
+// prior, so the unit (or the set) ships without being authored again.
 phase('Handoff')
-const hand = await agent(`Hand off the unit at ${p.output_path}. If you are on the default branch, cut a Conventional branch (feat/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the data file ${p.output_path} and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: ${cmds.length ? cmds.join(', ') + ', ' : ''}the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
-if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the unit and docs may be uncommitted', file: p.output_path }
-if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, file: p.output_path }
+const cmdsAll = [...new Set(plans.flatMap(cmdsOf))]
+const hand = await agent(`Hand off ${batch ? `the set of ${files.length} units at ${fileList}` : `the unit at ${files[0]}`}. If you are on the default branch, cut a Conventional branch (feat/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the data file${batch ? 's' : ''} ${fileList} and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: ${cmdsAll.length ? cmdsAll.join(', ') + ', ' : ''}the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+const where = batch ? { files } : { file: files[0] }
+if (!hand || !hand.branch) return Object.assign({ status: 'blocked', reason: hand && hand.problem ? hand.problem : `handoff step returned nothing; the ${batch ? 'units' : 'unit'} and docs may be uncommitted` }, where)
+if (!hand.tests_pass) return Object.assign({ status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}` }, where)
 result.handoff = {
   from: 'game-designer:author-level',
   branch: hand.branch,

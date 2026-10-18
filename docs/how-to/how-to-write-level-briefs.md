@@ -31,8 +31,16 @@ can then be built with `author-level`.
    are not settled; `problems` means the set itself breaks the
    progression rules (too many new ideas for the units, an idea before
    the one it needs). Fix the design docs or the unit list, not the briefs.
+   Findings from the independent check do not stop the run at once: a
+   revision step closes them and a fresh read-only check reads the set
+   again, up to three checks. A `blocked` result with `findings` or
+   `set_findings` means some remained after the last check; `design_gaps`
+   names those that need the design docs changed.
 3. Read the `sequence` table: one idea per unit, its arc role and the
-   difficulty curve. Rests should follow spikes.
+   difficulty curve. Rests should follow spikes. The progression table
+   rows follow the columns, order and link style of the project's
+   existing table; a new table with default columns is made only when the
+   project has none.
 4. Ship it: pass the whole result as `prior` to
    `/engineering-practices:deliver-package { wp: "<the package>", prior: <the result> }`
    for a work package, or land the branch with
@@ -40,12 +48,14 @@ can then be built with `author-level`.
    The workflow has already committed and pushed the briefs and the
    progression table on `handoff.branch`;
    do not rebuild it.
-5. Build each unit with `author-level`, in play order, passing its brief
-   path from `briefs`. Then run a balance pass over the set.
+5. Build the units with `author-level`, passing the brief paths from
+   `briefs` in play order: one per run with `brief`, or the whole set in
+   one run with `briefs: [...]`. Then run a balance pass over the set.
 
 ## If you run it inline
 
-The `check` steps review briefs you just drafted. Send those briefs to a
+The `check:<round>` steps review briefs you just drafted; the
+`revise:<round>` steps between them are yours to do. Send those briefs to a
 reviewer who did not write them (the project's code-reviewer role, or a
 fresh session) and name them in `run.reviewers`. If you answer them
 yourself, the run lists them as self-reviewed; say so in the pull request.

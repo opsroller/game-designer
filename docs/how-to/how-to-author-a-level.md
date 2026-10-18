@@ -31,9 +31,21 @@ decide what a level should teach in the first place, use the
 
    Pass `output` to choose the file, and `sequence` if the progression
    table is not where the design docs usually keep it.
+
+   To build a set of units in one run, pass their briefs in play order
+   instead:
+
+   ```
+   /game-designer:author-level {"briefs": ["docs/reference/levels/area-1-03-brief.md", "docs/reference/levels/area-1-04-brief.md"]}
+   ```
+
+   Each unit is authored, validated and checked against its brief on its
+   own; the simulation runs once over the whole set, and one docs pass and
+   one handoff cover it. The result lists `files` and per-unit `units`.
 2. If it returns `blocked`, read the reason. A missing brief point or an
    unowned path is fixed before running again; validation errors and
-   findings name the place in the data.
+   findings name the place in the data. Findings from the checks get up
+   to two revisions and re-checks before the run blocks.
 3. Read `sequence_issues`. A unit that introduces a second new idea, or
    follows another maximum spike, is a progression problem; change the
    brief or the order, not the data.
