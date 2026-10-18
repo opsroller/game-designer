@@ -60,13 +60,17 @@ const written = await agent(`Following the game-designer level-design skill ("De
 Rules: lay the critical path first, then alternatives, secrets and rests; put the goal, or a lead toward it, where the player sees it early; make first contact with the new idea safe; give any randomness a fixed, recorded seed; write data only (no code, no new fields the format does not define: if the brief needs one, stop and list it for the format's owner); use only the project's own content, never another game's level data. Return the path written and, in one line each, where the critical path, the first sight of the goal and the safe first contact are in the data.`, { phase: 'Author', label: 'author' })
 if (!written) return 'author-level: authoring failed; inspect the working tree.'
 
-const validate = (round) => agent(`Validate ${p.output_path}. Run ${p.validate_cmd || 'the project\'s schema or parser check (none was found: say so)'}${p.load_cmd ? `, then ${p.load_cmd}` : ''}. If a command fails on this file, fix the data (never the validator, loader or tests: those belong to their owners) and run it again, up to three times. Return ok only if every command ran and passed, the commands run, and errors still open.`, { schema: VALID, phase: 'Validate', label: `validate:${round}` })
+const cmds = [p.validate_cmd, p.load_cmd].filter(Boolean)
+const missing = [!p.validate_cmd && 'no schema or parser validator', !p.load_cmd && 'no loader or load test'].filter(Boolean)
+const validate = (round) => cmds.length
+  ? agent(`Validate ${p.output_path}. Run, in order: ${cmds.join(', then ')}. If a command fails on this file, fix the data (never the validator, loader or tests: those belong to their owners) and run it again, up to three times. Return ok only if every listed command ran and passed, the commands run, and errors still open.`, { schema: VALID, phase: 'Validate', label: `validate:${round}` })
+  : Promise.resolve({ ok: true, ran: [], errors: [] })
 
 phase('Validate')
+if (missing.length) log(`${missing.join(' and ')}; listed as unverified for the gameplay programmer`)
 let v = await validate(0)
 if (!v) return { status: 'blocked', reason: 'validation step did not return', file: p.output_path }
-if (!p.validate_cmd && !p.load_cmd) log('no validator or loader found; the file is unvalidated and listed for the gameplay programmer')
-if (!v.ok && (p.validate_cmd || p.load_cmd)) return { status: 'blocked', reason: 'data does not validate', file: p.output_path, errors: v.errors }
+if (!v.ok) return { status: 'blocked', reason: 'data does not validate', file: p.output_path, errors: v.errors }
 
 const checks = [
   ['brief', () => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${p.output_path} and this brief:\n${p.brief_summary}
@@ -76,26 +80,27 @@ Walk the critical path in the data as a first-time player would. Report off brie
     : Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })],
 ]
 
-let brief_check = null
-let sim = null
+const failing = { brief: c => c.verdict === 'off brief', sim: c => ['too easy', 'too hard'].includes(c.verdict) }
+const results = {}
+let pending = checks
 for (let round = 0; round <= 2; round++) {
-  phase(round === 0 ? 'Check' : 'Revise')
-  const r = await parallel(checks.map(([, run]) => run))
-  brief_check = r[0] || { verdict: 'not run', findings: ['brief check did not return; unverified'] }
-  sim = r[1] || { verdict: 'not run', findings: ['simulation did not return; unverified'] }
-  const open = [
-    ...(brief_check.verdict === 'off brief' ? brief_check.findings : []),
-    ...(['too easy', 'too hard'].includes(sim.verdict) ? sim.findings : []),
-  ]
+  if (round === 0) phase('Check')
+  const r = await parallel(pending.map(([, run]) => run))
+  pending.forEach(([name], i) => { results[name] = r[i] || { verdict: 'not run', findings: [`${name} check did not return; unverified`] } })
+  pending = checks.filter(([name]) => failing[name](results[name]))
+  const open = pending.flatMap(([name]) => results[name].findings)
   if (!open.length) break
   log(`round ${round}: ${open.length} findings`)
-  if (round === 2) return { status: 'blocked', reason: 'still off brief or off target after two revisions', file: p.output_path, findings: open, simulation: sim.table || '' }
+  if (round === 2) return { status: 'blocked', reason: 'still off brief or off target after two revisions', file: p.output_path, findings: open, simulation: results.sim.table || '' }
+  phase('Revise')
   const fixed = await agent(`Following the game-designer level-design skill's decision rules (fix readability before numbers; add thinking before speed; one variable per change where possible), make the smallest data change to ${p.output_path} that closes these findings. Data only; the brief stays as it is. If a finding needs the brief itself to change, do not edit: say so.\n- ${open.join('\n- ')}\nReturn what changed.`, { phase: 'Revise', label: `revise:${round + 1}` })
   if (!fixed) return { status: 'blocked', reason: 'revision failed', file: p.output_path, findings: open }
   v = await validate(round + 1)
   if (!v) return { status: 'blocked', reason: 'validation step did not return after revision', file: p.output_path }
-  if ((p.validate_cmd || p.load_cmd) && !v.ok) return { status: 'blocked', reason: 'revision broke validation', file: p.output_path, errors: v.errors }
+  if (!v.ok) return { status: 'blocked', reason: 'revision broke validation', file: p.output_path, errors: v.errors }
 }
+const brief_check = results.brief
+const sim = results.sim
 
 phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Add or update this unit's row in the progression table (unit, idea, levers, target success rate, file), recording ${p.output_path} and its seed. Update the data format reference only if the format changed, the how-to for adding a level only if the procedure changed, and the explanation only if the order or curve changed.${sim && sim.table ? `\nLatest simulation table:\n${sim.table}` : ''}\nProgression issues found at planning: ${JSON.stringify(p.sequence_issues || [])}`, { phase: 'Docs', label: 'docs' })
@@ -104,13 +109,14 @@ if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the ch
 phase('Docs check')
 const check = await agent(`Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Fix what you can; return remaining issues as findings with verdict "not run".`, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check' })
 
-const unverified = []
-if (!v.ok) unverified.push('no validator or loader: file not machine-checked')
+const unverified = missing.map(m => `${m}: file not fully machine-checked`)
 if (sim.verdict === 'not run') unverified.push(...sim.findings)
 if (brief_check.verdict === 'not run') unverified.push(...brief_check.findings)
 
+const docIssues = check ? check.findings : ['docs check did not run; docs unverified']
+
 return {
-  status: unverified.length ? 'incomplete' : 'done',
+  status: docIssues.length ? 'docs missing' : unverified.length ? 'incomplete' : 'done',
   file: p.output_path,
   validation: v,
   brief_check: brief_check.findings,
@@ -119,5 +125,5 @@ return {
   unverified,
   next: 'playtest the unit with players who have not seen it (game-designer playtesting skill); simulation confirms numbers, not feeling',
   docs,
-  doc_issues: check ? check.findings : ['docs check did not run; docs unverified'],
+  doc_issues: docIssues,
 }
