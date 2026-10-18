@@ -32,7 +32,7 @@ Empty `units` returns a usage string.
 
 ## Outputs
 
-Object: `status` (`done` or `docs missing`), `unverified_units`, `proposals`, `applied`, `docs`, `doc_issues`.
+Object: `status` (`done`, `incomplete` when any unit is unverified, or `docs missing`), `unverified_units`, `proposals`, `applied`, `docs`, `doc_issues`.
 
 ## Stop conditions
 
@@ -41,5 +41,6 @@ Object: `status` (`done` or `docs missing`), `unverified_units`, `proposals`, `a
 | No targets found | `blocked`; write targets first |
 | A unit's simulation returns nothing | Unit marked `unverified`, kept unchanged and listed |
 | Curve step returns nothing | `{ status: 'blocked' }` with raw results |
+| Apply step returns nothing (with `apply`) | `{ status: 'blocked' }`; docs not written; inspect the working tree |
 
 Related: [How to run a balance pass](../how-to/how-to-run-a-balance-pass.md), [reference index](index.md).

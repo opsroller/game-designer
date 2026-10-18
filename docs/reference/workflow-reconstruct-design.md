@@ -31,7 +31,7 @@ Missing `reference` returns a usage string.
 
 ## Outputs
 
-Object: `status`, `scope`, `spec`, `evidence`, `rule_counts`, `unverified_systems`, `failed_systems`, `docs`, `doc_issues`.
+Object: `status` (`done`, `incomplete` when any system's research failed, or `docs missing`), `scope`, `spec`, `evidence`, `rule_counts`, `unverified_systems`, `failed_systems`, `docs`, `doc_issues`.
 
 ## Stop conditions
 

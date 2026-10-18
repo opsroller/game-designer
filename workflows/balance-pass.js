@@ -12,7 +12,7 @@ export const meta = {
   ],
 }
 
-const units = (args && args.units) || []
+const units = args && Array.isArray(args.units) ? args.units : []
 if (!units.length) return 'Usage: balance-pass with args { units: ["<content file or id>", ...], targets: "<targets page, optional>", apply: false }'
 const targets = (args && args.targets) || 'the balance targets reference page in the project design docs'
 const apply = !!(args && args.apply)
@@ -47,7 +47,8 @@ let applied = 'not applied (apply: false); proposals only'
 if (apply) {
   phase('Apply')
   const a = await agent(`Apply these balance changes to the content data files your project profile says the game designer owns, in a single edit per file, then re-run ${p.simulator} on each changed unit and confirm it is now on target. If a file is not yours to edit, do not edit it; list it for its owner.\n${curve}\nReturn before/after values, re-simulation results, and any unit still off target.`, { phase: 'Apply', label: 'apply' })
-  applied = a || 'apply step failed; data unchanged or partially changed: inspect the working tree'
+  if (!a) return { status: 'blocked', reason: 'apply step failed; data unchanged or partially changed: inspect the working tree', unverified_units: unverified, proposals: curve }
+  applied = a
 }
 
 phase('Docs')
@@ -57,7 +58,7 @@ phase('Docs check')
 const check = docs ? await agent(`Review the documentation pages touched in this balance pass (${docs}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Fix what you can; return remaining issues.`, { schema: ISSUES, phase: 'Docs check', label: 'docs-check' }) : null
 
 return {
-  status: docs ? 'done' : 'docs missing',
+  status: unverified.length ? 'incomplete' : docs ? 'done' : 'docs missing',
   unverified_units: unverified,
   proposals: curve,
   applied,

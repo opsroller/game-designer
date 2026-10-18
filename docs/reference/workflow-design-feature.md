@@ -32,7 +32,7 @@ Missing `feature` returns a usage string.
 
 ## Outputs
 
-Object: `feature`, `spec`, `decision`, `playtest_plan`, `docs`, `doc_issues`.
+Object: `status` (`done`), `feature`, `spec`, `decision`, `playtest_plan`, `docs`, `doc_issues`.
 
 ## Stop conditions
 

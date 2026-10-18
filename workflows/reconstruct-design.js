@@ -57,7 +57,7 @@ phase('Docs check')
 const check = docs ? await agent(`Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Fix what you can; return remaining issues as a list.`, { phase: 'Docs check', label: 'docs-check' }) : null
 
 return {
-  status: docs ? 'done' : 'docs missing',
+  status: systems.some(s => s.failed) ? 'incomplete' : docs ? 'done' : 'docs missing',
   scope: p.scope, spec: p.spec_path, evidence: p.evidence_path, rule_counts: spec,
   unverified_systems: unverifiedSystems, failed_systems: systems.filter(s => s.failed).map(s => s.system),
   docs: docs || 'docs step failed', doc_issues: check || 'docs check did not run; docs unverified',
