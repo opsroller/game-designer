@@ -36,10 +36,15 @@ can then be built with `author-level`.
    not stop it.
    Blocking findings from the independent check do not stop the run at
    once: a revision step closes them and a fresh read-only check reads
-   the set again, up to three checks. When only minor wording findings
-   are left, they are fixed in place and the run goes on. A `blocked`
-   result with `findings` or `set_findings` means blocking ones remained
-   after the last check.
+   the set again, up to four checks. When only minor wording findings
+   are left, they are fixed in place, with the matching sequence rows,
+   and the run goes on. If blocking findings remain after the fourth
+   check, the run still writes, documents and hands off the set, with
+   `status: "open findings"` and the findings in `open_items`. Close them
+   before the PR merges: settle what each needs (a planning note, a
+   design-doc change), then follow `resume`, which re-runs the last
+   revision and check on the drafted set without redoing Plan, Sequence
+   and Draft.
 3. Read `design_gaps` and `pace`. A design gap is a problem in the
    design docs themselves, such as two pages that disagree or a clock too
    short for the goals it is meant to hold; the briefs follow the docs as

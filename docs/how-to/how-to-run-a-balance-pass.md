@@ -28,7 +28,11 @@ targets with simulated play, and apply the smallest fixes, using the
    the curve around them.
 3. If the proposals look right, run again with `"apply": true`. One agent
    edits only data files the project profile says the designer owns,
-   re-simulates, and lists files that belong to someone else.
+   re-simulates, and lists files that belong to someone else. Any value a
+   checker prints that the data must record is then converged: set,
+   re-checked and set again until it stops changing, up to five rounds. A
+   value still moving comes back in `unconverged` with `status:
+   "incomplete"`, and nothing is handed off.
 4. Playtest the changed units (see [How to run a playtest](how-to-run-a-playtest.md)).
    Simulation confirms numbers, not feeling.
 5. Ship it: pass the whole result as `prior` to
@@ -52,6 +56,15 @@ the pass does not force the data. It returns `status: "needs decision"`.
    the independent check doubted; fix or drop a proposal it rejects.
 2. Send each proposal to the `decider` it names. Do not edit the targets
    page until the change is accepted.
+   Once it is, pass it to the next run so the pass applies it for you:
+
+   ```
+   /game-designer:balance-pass {"units": [...], "apply": true, "approved_target_changes": [{"target": "<target as written>", "proposed": "<approved text>", "approved_by": "<who decided>", "recorded": "<where the decision is written down>"}]}
+   ```
+
+   The run simulates against the approved targets, the Docs step changes
+   exactly those targets and records who approved each and where, and the
+   handoff commits the targets page with them.
 3. Send each item in `handoffs` to its owner role (engineering-practices
    peer-coordination): a simulator, bot or checker fault is theirs to fix,
    not yours.
