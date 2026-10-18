@@ -29,6 +29,7 @@ Matching an existing game:
 ## Workflows
 
 - [design-feature](workflow-design-feature.md): goal to reviewed spec, playtest plan and docs.
+- [author-level](workflow-author-level.md): finished brief to validated, checked and documented level data.
 - [balance-pass](workflow-balance-pass.md): parallel simulation, curve fitting, data changes.
 - [reconstruct-design](workflow-reconstruct-design.md): sourced reconstruction of a reference game.
 
@@ -39,7 +40,7 @@ Matching an existing game:
 | Field | Value |
 |---|---|
 | `name` | `game-designer` |
-| `version` | `0.1.0` |
+| `version` | `0.2.0` |
 | `author.name` | `opsroller` |
 | `repository` | `https://github.com/opsroller/game-designer` |
 | `license` | `GPL-2.0-or-later` |
