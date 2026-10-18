@@ -215,14 +215,22 @@ const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking'
 const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
 let docPages = docs ? [...(docs.pages || [])] : []
 let docIssueList = docs ? [] : [{ problem: 'docs check did not run; docs unverified', severity: 'blocking' }]
+// Each re-check is told what the last check found, so it confirms those
+// fixes instead of judging the pages afresh; an issue the fix left for a
+// content decision stays blocking whatever the re-check says.
+let docPrior = []
+let docLeft = []
+const docPriorLine = (prior) => prior.length ? `\nThe last check found these issues and a fix step has tried to close them; confirm each against the pages now and report any still present, with its severity, alongside anything new:\n- ${prior.map(docText).join('\n- ')}` : ''
 for (let round = 1; docs && round <= 3; round++) {
-  const c = await agent(docCheckPrompt(docPages), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
+  const c = await agent(docCheckPrompt(docPages) + docPriorLine(docPrior), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
   if (!c) { docIssueList = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
-  docIssueList = (c.issues || []).map(docIssue)
+  docIssueList = [...(c.issues || []).map(docIssue), ...docLeft]
   if (!docIssueList.length || round === 3) break
   const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(docText).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
   if (!fix) break
   docPages = [...new Set([...docPages, ...(fix.pages || [])])]
+  docPrior = docIssueList.filter(i => !docLeft.includes(i))
+  docLeft = (fix.left || []).map(l => ({ problem: `left by the docs fix (needs a content decision): ${l}`, severity: 'blocking' }))
 }
 const docBlocking = docIssueList.filter(i => i.severity !== 'minor')
 
