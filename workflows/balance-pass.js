@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'balance-pass',
-  description: 'Simulate a set of content units (levels, encounters, items) in parallel against written targets, fit the difficulty curve, apply the smallest data changes and document them. When no data change can meet a target or curve rule, propose the target change with evidence, checked independently, and hand any simulator or tool fault to its owner instead of editing it. Use when tuning a level set or economy. args: { units: ["<content file or id>", ...], targets: "<targets page, optional>", apply: true|false (default false: propose only) }',
+  description: 'Simulate a set of content units (levels, encounters, items) in parallel against written targets, fit the difficulty curve, apply the smallest data changes and document them. When no data change can meet a target or curve rule, propose the target change with evidence, checked independently, and hand any simulator or tool fault to its owner instead of editing it (a fault in the tool itself, such as a saturated strategy, leaves its metric unverified and holds no unit). Use when tuning a level set or economy. args: { units: ["<content file or id>", ...], targets: "<targets page, optional>", apply: true|false (default false: propose only) }',
   phases: [
     { title: 'Plan', detail: 'targets, simulator, doc kinds via the compass' },
     { title: 'Simulate', detail: 'one agent per unit, results only' },
-    { title: 'Curve', detail: 'fit proposals to the whole sequence; split out unreachable targets and tool faults' },
+    { title: 'Curve', detail: 'fit proposals to the whole sequence; split out unreachable targets and tool faults, per unit or tool-wide' },
     { title: 'Targets', detail: 'only if a target cannot be met by data: evidence-backed target change proposals, independent check' },
     { title: 'Apply', detail: 'one agent edits data files and re-simulates' },
     { title: 'Docs', detail: 'balance reference and rationale in the same change' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched, minor issues go to the handoff notes' },
     { title: 'Handoff', detail: 'only with apply: commit and push the changed data and docs, re-run the simulator and checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -124,7 +124,10 @@ const SIM = { type: 'object', properties: {
 }, required: ['unit', 'verdict', 'table'] }
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
-const ISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
+const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
+  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
+}, required: ['problem', 'severity'] } } }, required: ['issues'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const CURVE = { type: 'object', properties: {
   table: { type: 'string' },
   unreachable: { type: 'array', items: { type: 'object', properties: {
@@ -134,7 +137,8 @@ const CURVE = { type: 'object', properties: {
   tool_faults: { type: 'array', items: { type: 'object', properties: {
     tool: { type: 'string' }, owner: { type: 'string' }, fault: { type: 'string' },
     evidence: { type: 'string' }, units: { type: 'array', items: { type: 'string' } },
-  }, required: ['tool', 'owner', 'fault', 'evidence'] } },
+    scope: { type: 'string', enum: ['units', 'tool'] }, metric: { type: 'string' },
+  }, required: ['tool', 'owner', 'fault', 'evidence', 'scope'] } },
 }, required: ['table', 'unreachable', 'tool_faults'] }
 const TARGETS = { type: 'object', properties: {
   changes: { type: 'array', items: { type: 'object', properties: {
@@ -161,12 +165,18 @@ const cv = await agent(`Simulation results for a content sequence, in play order
 Following the game-designer economy-balance and level-design skills, check the curve rises as intended with rests after spikes, adjust per-unit proposals to fit the whole curve (one variable per unit where possible), and return as table a markdown table: unit, current value, proposed change, reason. Units marked unverified stay unchanged and listed. Do not edit files.
 Then separate what data cannot fix:
 - unreachable: a per-unit target or a curve rule (one that compares units) that no value of the data the designer owns can meet, for example a rate already at its ceiling that a rule needs to rise or fall, two targets that contradict each other, or a rule the sequence's own structure breaks on every unit. For each, the target as written, the units, the evidence (the simulation rows, the bounds or arithmetic that show no data value meets it) and why a data change cannot. Do not list a target that a larger data change would meet; propose that change in the table instead. Leave those units' rows unchanged in the table.
-- tool_faults: results that come from the simulator, a bot or another tool rather than the data (a rule implemented differently from the spec, a metric that saturates or ties, a strategy that plays nothing like a player, a crash). For each, the tool, its owner role from the project profile's path ownership, the fault, the evidence and the units affected. Never edit a tool.
+- tool_faults: results that come from the simulator, a bot or another tool rather than the data (a rule implemented differently from the spec, a metric that saturates or ties, a strategy that plays nothing like a player, a crash). For each, the tool, its owner role from the project profile's path ownership, the fault, the evidence, the units affected, the metric it spoils, and its scope: "tool" when the fault is in the tool itself whatever the data (a strategy that wins every unit, a metric pinned at its ceiling or floor everywhere, a crash on any input), so no unit's data is at fault and retuning cannot help; "units" when only some units' results are spoiled (a rule the tool gets wrong that only those units use). A tool-wide fault does not hold units: judge each unit on the metrics the fault does not spoil, propose data changes from those, and say in the table which metric is unverified. Never edit a tool.
 Both lists are empty when everything can be fixed in data.`, { schema: CURVE, phase: 'Curve', label: 'curve' })
 if (!cv) return { status: 'blocked', reason: 'curve fitting failed', results }
 const curve = cv.table
 const unreachable = cv.unreachable || []
 const faults = cv.tool_faults || []
+// A fault that names every unit is the tool's, not the units', whatever
+// scope it was given: it holds no unit, it leaves its metric unverified.
+const toolWide = f => f.scope === 'tool' || (units.length > 1 && units.every(u => (f.units || []).includes(u)))
+const unitFaults = faults.filter(f => !toolWide(f))
+const wideFaults = faults.filter(toolWide)
+const unmeasured = wideFaults.map(f => `${f.metric || 'results'} (${f.tool}: ${f.fault})`)
 
 let targetChanges = []
 let targetFindings = []
@@ -178,47 +188,59 @@ if (unreachable.length) {
   const tc = await agent(`You did not write these proposals. Check each proposed target change for ${targets} against the simulation results and the targets' intent. Report a finding when: the evidence does not show that data cannot meet the current target (a data change would), the proposal drops what the target protects, it makes another unit or target fail without saying so, or a needed tool change is missing. Do not edit files.\nProposals: ${JSON.stringify(targetChanges)}\nResults: ${JSON.stringify(results)}`, { schema: TCHECK, phase: 'Targets', label: 'check:targets', independent: true })
   targetFindings = tc ? tc.findings || [] : ['target proposal check did not return; proposals unverified']
 }
-const held = [...new Set([...unreachable.flatMap(u => u.units || []), ...faults.flatMap(f => f.units || [])])]
+const held = [...new Set([...unreachable.flatMap(u => u.units || []), ...unitFaults.flatMap(f => f.units || [])])]
 const handoffs = [
-  ...faults.map(f => ({ owner: f.owner, tool: f.tool, change: f.fault, evidence: f.evidence, units: f.units || [] })),
+  ...faults.map(f => ({ owner: f.owner, tool: f.tool, change: f.fault, evidence: f.evidence, units: f.units || [], scope: toolWide(f) ? 'tool' : 'units' })),
   ...targetChanges.filter(c => c.needs_tool_change).map(c => ({ owner: 'owner of the tool that encodes this target (see project profile)', tool: c.needs_tool_change, change: `follow the target change "${c.proposed}" once accepted`, evidence: c.evidence, units: [] })),
 ]
 
 let applied = 'not applied (apply: false); proposals only'
 if (apply) {
   phase('Apply')
-  const a = await agent(`Apply these balance changes to the content data files your project profile says the game designer owns, in a single edit per file, then re-run ${p.simulator} on each changed unit and confirm it is now on target. If a file is not yours to edit, do not edit it; list it for its owner. Never edit the simulator, a bot, a checker or the targets page.${held.length ? ` Leave these units unchanged: their results wait on a target decision or a tool fix (${held.join(', ')}).` : ''}\n${curve}\nReturn before/after values, re-simulation results, and any unit still off target.`, { phase: 'Apply', label: 'apply' })
+  const a = await agent(`Apply these balance changes to the content data files your project profile says the game designer owns, in a single edit per file, then re-run ${p.simulator} on each changed unit and confirm it is now on target. If a file is not yours to edit, do not edit it; list it for its owner. Never edit the simulator, a bot, a checker or the targets page.${held.length ? ` Leave these units unchanged: their results wait on a target decision or a tool fix (${held.join(', ')}).` : ''}${unmeasured.length ? ` These metrics are spoiled by a tool fault for every unit, so do not tune toward them or read them as confirmation: ${unmeasured.join('; ')}.` : ''}\n${curve}\nReturn before/after values, re-simulation results, and any unit still off target.`, { phase: 'Apply', label: 'apply' })
   if (!a) return { status: 'blocked', reason: 'apply step failed; data unchanged or partially changed: inspect the working tree', unverified_units: unverified, proposals: curve }
   applied = a
 }
 
 phase('Docs')
-const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Update the balance reference with current values and the latest simulation tables; record why the curve changed in the explanation page if the shape changed. Do not change the targets themselves: proposed target changes are not accepted yet and go in the pull request, not the reference. Changes: ${typeof applied === 'string' ? applied : JSON.stringify(applied)}\nProposals:\n${curve}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
+const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Update the balance reference with current values and the latest simulation tables${unmeasured.length ? `, marking these metrics unverified until their tool is fixed: ${unmeasured.join('; ')}` : ''}; record why the curve changed in the explanation page if the shape changed. Do not change the targets themselves: proposed target changes are not accepted yet and go in the pull request, not the reference. Changes: ${typeof applied === 'string' ? applied : JSON.stringify(applied)}\nProposals:\n${curve}\nReturn pages: the paths of every page touched, and undocumented: any change left undocumented, with why.`, { schema: DOCS_OUT, phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
-// fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched in this balance pass (${JSON.stringify(docs)}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Read-only: do not edit anything; return remaining issues.`
-let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
-if (check && (check.issues || []).length) {
-  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
-  if (docFix) check = await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
+// fixes are their own step, followed by a fresh check of every page touched
+// so far (pages a fix added included). Up to three checks and two fixes;
+// minor issues left at the end go to the handoff notes, blocking ones stop it.
+const docCheckPrompt = (pages) => `Review the documentation pages touched in this balance pass: ${JSON.stringify(pages)}. Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. Read-only: do not edit anything; return remaining issues.`
+const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
+const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
+let docPages = docs ? [...(docs.pages || [])] : []
+let docIssueList = docs ? [] : [{ problem: 'docs check did not run; docs unverified', severity: 'blocking' }]
+for (let round = 1; docs && round <= 3; round++) {
+  const c = await agent(docCheckPrompt(docPages), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
+  if (!c) { docIssueList = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
+  docIssueList = (c.issues || []).map(docIssue)
+  if (!docIssueList.length || round === 3) break
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssueList.map(docText).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  if (!fix) break
+  docPages = [...new Set([...docPages, ...(fix.pages || [])])]
 }
+const docBlocking = docIssueList.filter(i => i.severity !== 'minor')
 
 const decisions = targetChanges.length > 0
 const result = {
-  status: unverified.length ? 'incomplete' : !docs ? 'docs missing' : decisions || handoffs.length ? 'needs decision' : 'done',
+  status: unverified.length ? 'incomplete' : !docs || docBlocking.length ? 'docs missing' : decisions || held.length ? 'needs decision' : 'done',
   unverified_units: unverified,
   proposals: curve,
   target_changes: targetChanges,
   target_check: targetFindings,
   handoffs,
   held_units: held,
+  unverified_metrics: unmeasured,
   applied,
-  docs: docs || 'docs step failed',
-  doc_issues: check ? check.issues : ['docs check did not run; docs unverified'],
+  docs: docs ? Object.assign({}, docs, { pages: docPages }) : 'docs step failed',
+  doc_issues: docIssueList.map(docText),
   next: decisions || handoffs.length
-    ? `${decisions ? 'Send target_changes, with their evidence and target_check, to the decider each names; once accepted, update the targets reference. ' : ''}${handoffs.length ? 'Send each handoff to its owner role (engineering-practices peer-coordination); do not edit their tools. ' : ''}Then re-run balance-pass on held_units.`
+    ? `${decisions ? 'Send target_changes, with their evidence and target_check, to the decider each names; once accepted, update the targets reference. ' : ''}${handoffs.length ? 'Send each handoff to its owner role (engineering-practices peer-coordination); do not edit their tools. ' : ''}${held.length ? 'Then re-run balance-pass on held_units.' : 'Once the tool is fixed, re-run balance-pass to confirm unverified_metrics.'}`
     : 'playtest the changed units; commit data and docs in one pull request (engineering-practices deliver-package or small-change)',
 }
 // With apply false nothing changed, so there is nothing to hand off.
@@ -227,7 +249,7 @@ if (!apply || ['incomplete', 'docs missing'].includes(result.status)) return res
 // The handoff is what engineering-practices deliver-package takes as
 // prior, so the applied pass ships without being simulated again.
 phase('Handoff')
-const hand = await agent(`Hand off this balance pass. If you are on the default branch, cut a Conventional branch (fix/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the content data files the Apply step changed and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push; leave held units (${held.join(', ') || 'none'}), tools and the targets page as they are. On the pushed head run the checks that apply: ${p.simulator} on each changed unit, any data validator or load test, the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+const hand = await agent(`Hand off this balance pass. If you are on the default branch, cut a Conventional branch (fix/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the content data files the Apply step changed and the docs pages (${docPages.join(', ') || 'as written'}) as Conventional Commits, and push; leave held units (${held.join(', ') || 'none'}), tools and the targets page as they are. On the pushed head run the checks that apply: ${p.simulator} on each changed unit, any data validator or load test, the project's test suite and any docs or link check its profile names. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
 if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the changed data and docs may be uncommitted', unverified_units: unverified, proposals: curve }
 if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, unverified_units: unverified, proposals: curve }
 result.handoff = {
@@ -236,10 +258,11 @@ result.handoff = {
   pr: hand.pr || '',
   head_sha: hand.head_sha || '',
   tests_pass: true,
-  docs: docs.pages || [],
+  docs: docPages,
   undocumented: docs.undocumented || [],
   notes: [
     ...(held.length ? [`held unchanged, waiting on a target decision or a tool fix: ${held.join(', ')}`] : []),
+    ...(unmeasured.length ? [`unverified until a tool fix (tool-wide fault, no unit held): ${unmeasured.join('; ')}`] : []),
     ...(decisions ? ['proposed target changes are not applied; they go in the PR body for their decider'] : []),
     ...result.doc_issues.map(d => 'docs check: ' + d),
   ],

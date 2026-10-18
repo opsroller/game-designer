@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export const meta = {
   name: 'level-briefs',
-  description: 'Write the briefs for a set of levels or content units from the progression and design docs: order the ideas, give each unit its idea, feeling, duration, target success rate and takeaway in the shape author-level checks for, check the set with a reviewer who did not write it, revise and re-check up to three rounds, write the briefs and document them in the shape of the project\'s own progression table. Use before author-level when a sequence of units has no finished briefs. args: { units: ["<unit id>", ...] (optional: default every unit in the progression without a finished brief), progression: "<progression page, optional>", design: "<design docs or spec pages, optional>", output: "<where briefs go, optional>" }',
+  description: 'Write the briefs for a set of levels or content units from the progression and design docs: order the ideas, give each unit its idea, feeling, duration, target success rate and takeaway in the shape author-level checks for, check the duration against the clock at human pace, check the set with a reviewer who did not write it, revise and re-check up to three rounds (minor wording findings are fixed in place; conflicts with the design docs go to design_gaps instead of the loop), write the briefs and document them in the shape of the project\'s own progression table. Use before author-level when a sequence of units has no finished briefs. args: { units: ["<unit id>", ...] (optional: default every unit in the progression without a finished brief), progression: "<progression page, optional>", design: "<design docs or spec pages, optional>", output: "<where briefs go, optional>" }',
   phases: [
-    { title: 'Plan', detail: 'units, idea inventory and dependencies, brief format and location, targets, doc kinds via the compass' },
+    { title: 'Plan', detail: 'units, idea inventory and dependencies, brief format and location, targets, clock and human pace, blocking gaps and non-blocking notes, doc kinds via the compass' },
     { title: 'Sequence', detail: 'one new idea per unit, arc role, difficulty and levers across the set' },
-    { title: 'Draft', detail: 'one agent per unit, brief returned, not written' },
-    { title: 'Check', detail: 'independent read of the whole set against the sequence rules and brief completeness' },
-    { title: 'Revise', detail: 'revise the briefs (and the sequence, for set findings) against the findings, then a fresh read-only re-check; up to three checks and two revisions' },
+    { title: 'Draft', detail: 'one agent per unit, brief returned, not written; duration checked against the clock at human pace' },
+    { title: 'Check', detail: 'independent read of the whole set against the sequence rules and brief completeness; findings blocking or minor, design-doc conflicts split out as design gaps' },
+    { title: 'Revise', detail: 'revise the briefs (and the sequence, for set findings) against the findings, then a fresh read-only re-check; up to three checks and two revisions; only minor findings left: polish them in place and go on' },
     { title: 'Write', detail: 'briefs into the project\'s brief location and format' },
     { title: 'Docs', detail: 'progression table rows in the shape of the project\'s existing table, and the order\'s rationale' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched, minor issues go to the handoff notes' },
     { title: 'Handoff', detail: 'commit and push the briefs and docs, run the docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -126,7 +126,9 @@ const PLAN = { type: 'object', properties: {
   output_path: { type: 'string' }, owned: { type: 'boolean' },
   brief_format: { type: 'string' }, example: { type: 'string' },
   targets: { type: 'string' },
+  pace: { type: 'string' },
   gaps: { type: 'array', items: { type: 'string' } },
+  notes: { type: 'array', items: { type: 'string' } },
   doc_plan: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['tutorial', 'how-to', 'reference', 'explanation'] }, page: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'page'] } },
 }, required: ['units', 'ideas', 'output_path', 'owned', 'brief_format', 'targets', 'doc_plan'] }
 const SEQ = { type: 'object', properties: {
@@ -143,13 +145,29 @@ const BRIEF = { type: 'object', properties: {
   duration: { type: 'string' }, success_rate: { type: 'string' }, takeaway: { type: 'string' },
   role: { type: 'string' }, levers: { type: 'array', items: { type: 'string' } },
   first_contact: { type: 'string' }, notes: { type: 'string' },
+  pace_check: { type: 'object', properties: {
+    human_duration: { type: 'string' }, clock: { type: 'string' }, fits: { type: 'boolean' }, note: { type: 'string' },
+  }, required: ['human_duration', 'clock', 'fits'] },
 }, required: ['unit', 'idea', 'feeling', 'duration', 'success_rate', 'takeaway'] }
+// severity: minor is wording or clarity a revision can fix in place with no
+// change to what a brief asks for; design_gap marks a problem in the design
+// docs themselves, which no brief can fix.
+const FINDING = { type: 'object', properties: {
+  unit: { type: 'string' }, problem: { type: 'string' },
+  severity: { type: 'string', enum: ['blocking', 'minor'] }, design_gap: { type: 'boolean' },
+}, required: ['unit', 'problem', 'severity'] }
 const CHECK = { type: 'object', properties: {
-  findings: { type: 'array', items: { type: 'object', properties: {
-    unit: { type: 'string' }, problem: { type: 'string' },
-  }, required: ['unit', 'problem'] } },
-  set_findings: { type: 'array', items: { type: 'string' } },
-}, required: ['findings', 'set_findings'] }
+  findings: { type: 'array', items: FINDING },
+  set_findings: { type: 'array', items: { type: 'object', properties: {
+    problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] }, design_gap: { type: 'boolean' },
+  }, required: ['problem', 'severity'] } },
+  design_gaps: { type: 'array', items: { type: 'object', properties: {
+    unit: { type: 'string' }, problem: { type: 'string' }, doc: { type: 'string' },
+  }, required: ['problem'] } },
+}, required: ['findings', 'set_findings', 'design_gaps'] }
+const POLISHED = { type: 'object', properties: {
+  briefs: { type: 'array', items: BRIEF },
+}, required: ['briefs'] }
 const REVISED = { type: 'object', properties: {
   briefs: { type: 'array', items: BRIEF },
   table: { type: 'string' },
@@ -160,8 +178,11 @@ const WRITE = { type: 'object', properties: {
   written: { type: 'array', items: { type: 'object', properties: { unit: { type: 'string' }, path: { type: 'string' } }, required: ['unit', 'path'] } },
 }, required: ['written'] }
 const DOCS_OUT = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, undocumented: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
+const DOC_CHECK = { type: 'object', properties: { issues: { type: 'array', items: { type: 'object', properties: {
+  page: { type: 'string' }, problem: { type: 'string' }, severity: { type: 'string', enum: ['blocking', 'minor'] },
+}, required: ['problem', 'severity'] } } }, required: ['issues'] }
+const DOC_FIX = { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } }, left: { type: 'array', items: { type: 'string' } } }, required: ['pages'] }
 const HANDOFF = { type: 'object', properties: { branch: { type: 'string' }, pr: { type: 'string' }, head_sha: { type: 'string' }, tests_pass: { type: 'boolean' }, problem: { type: 'string' } }, required: ['branch', 'tests_pass'] }
-const ISSUES = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }
 
 phase('Plan')
 const p = await agent(`You are the game designer. Following the game-designer level-design skill ("Progression: the order ideas arrive"), read the project profile, ${progression} and ${design}, the balance targets and any existing level briefs and level data. Do not edit files. Report:
@@ -170,22 +191,27 @@ const p = await agent(`You are the game designer. Following the game-designer le
 - output_path: ${output}; owned: whether the project profile gives the game designer that path.
 - brief_format: the shape existing briefs use (headings or fields), so the new ones match it and author-level reads them; example: the path of the closest existing brief, empty if none.
 - targets: the balance targets page and the target success rate and duration range it sets for these units, empty if none.
-- gaps: anything that stops briefs being written (an idea with no definition, more new ideas than units, a unit count the design docs leave open). Empty if none.
+- pace: if the targets or design docs give a clock (a time limit per unit) or a human pace (seconds per move or action), both, and how one turns into the other for these units; empty if the project has neither.
+- gaps: only what makes the briefs impossible to write: an idea with no definition, more new ideas than units, a unit count the design docs leave open. Empty if none. These stop the run.
+- notes: everything else worth knowing that does not stop the briefs: a choice the design docs leave to the designer (say which default you take), a provisional number, a doc that disagrees with another in a way the briefs can work around. Empty if none. These do not stop the run; they go to the briefs and into the result.
 - doc_plan: Diataxis kind and page for each doc this touches (the progression table and briefs are reference; why the order is so is explanation).`, { schema: PLAN, phase: 'Plan', label: 'plan' })
 if (!p) return 'level-briefs: planning failed; nothing written.'
 if (!p.owned) return `level-briefs: blocked; ${p.output_path} is not a path the project profile gives the game designer. Hand the set to its owner or get the profile changed.`
 if (!p.units.length) return 'level-briefs: nothing to do; every unit in range already has a finished brief.'
-if ((p.gaps || []).length) return { status: 'blocked', reason: 'the design docs do not settle this set yet', gaps: p.gaps, next: 'settle the open ideas with design-feature or the design-spec skill, then run level-briefs again' }
+if ((p.gaps || []).length) return { status: 'blocked', reason: 'the design docs do not settle this set yet', gaps: p.gaps, notes: p.notes || [], next: 'settle the open ideas with design-feature or the design-spec skill, then run level-briefs again' }
+const notes = p.notes || []
+const notesLine = notes.length ? `\nPlanning notes (open choices and assumptions, not blockers; follow the defaults they name): ${JSON.stringify(notes)}` : ''
 
 phase('Sequence')
 const sq = await agent(`Following the game-designer level-design skill (progression steps 2-5), lay out the sequence for these units in play order: ${p.units.join(', ')}${(p.already_briefed || []).length ? ` (already briefed and fixed: ${p.already_briefed.join(', ')})` : ''}.
-Ideas and dependencies: ${JSON.stringify(p.ideas)}. Targets: ${p.targets || 'none written; give relative difficulty only'}.
+Ideas and dependencies: ${JSON.stringify(p.ideas)}. Targets: ${p.targets || 'none written; give relative difficulty only'}.${notesLine}
 For each unit give: the one idea it is about, its role in that idea's arc (introduce, develop, twist, test, or rest), intended difficulty on a 1-10 scale relative to the set, and the difficulty levers it uses (goal size and variety first, then complexity, then scarcity, then time pressure and precision last). Rules: at most one new idea per unit; no idea before the ideas it needs; introductions are safe; the curve rises with a sawtooth, a rest after each spike, never two maximum spikes in a row. Return rows, the same as a markdown table, and problems: any rule the set cannot meet as given (empty if none). Do not edit files.`, { schema: SEQ, phase: 'Sequence', label: 'sequence' })
 if (!sq) return 'level-briefs: sequencing failed; nothing written.'
 if ((sq.problems || []).length) return { status: 'blocked', reason: 'the set breaks the progression rules', problems: sq.problems, sequence: sq.table, next: 'change the unit count or the idea order in the design docs, then run again' }
 
 const draftPrompt = (row) => `Following the game-designer level-design skill ("Designing one level", step 1), write the brief for unit ${row.unit}. Its place in the set: ${JSON.stringify(row)}. Whole sequence:\n${sq.table}
-Give the five points author-level checks for: ${FIVE}. Make them concrete and checkable: the duration as a time or move range, the success rate as a number matching ${p.targets || 'the set\'s relative difficulty'} for this unit's place, the feeling as one or two words a playtester could confirm, the takeaway as a sentence starting "The player knows". Also give its role, levers, first_contact (where the player first meets the idea and why it is safe; for a test or rest unit, which earlier ideas it mixes) and notes for the author (anything the data must do, never a layout). Use only the project's own design, never another game's level data. Do not edit files.`
+Give the five points author-level checks for: ${FIVE}. Make them concrete and checkable: the duration as a time or move range, the success rate as a number matching ${p.targets || 'the set\'s relative difficulty'} for this unit's place, the feeling as one or two words a playtester could confirm, the takeaway as a sentence starting "The player knows". Also give its role, levers, first_contact (where the player first meets the idea and why it is safe; for a test or rest unit, which earlier ideas it mixes) and notes for the author (anything the data must do, never a layout). ${p.pace ? `\nPace: ${p.pace}. Check the duration against the clock at human pace: estimate the moves or actions a first-time player needs (from the goal size, the targets or the simulator's move counts), multiply by the human pace, and compare with the clock this unit gets. Return pace_check: human_duration (the estimate and how you got it), clock, fits (whether a first-time player finishes inside the clock with the margin the targets imply), and note. If it does not fit, change this brief (goal size, duration, target success rate) within the design; if the design's own numbers make it impossible for this unit, keep the brief as the design asks and say so in note.` : ''}${notesLine}
+Use only the project's own design, never another game's level data. Do not edit files.`
 
 phase('Draft')
 const rows = sq.rows.filter(r => p.units.includes(r.unit))
@@ -199,42 +225,62 @@ if (failed.length) return { status: 'blocked', reason: 'some briefs did not draf
 
 // Check, revise, re-check: the check only reads, so it stays independent of
 // the briefs it judges; the revision is its own step, followed by a fresh check.
-const label = f => typeof f === 'string' ? f : `${f.unit}: ${f.problem}`
+// Findings that are only minor (wording, clarity) are fixed in place by a
+// polish step, without another check; design gaps (problems in the design
+// docs, not the briefs) leave the loop and go to the result.
+const label = f => typeof f === 'string' ? f : f.unit ? `${f.unit}: ${f.problem}` : f.problem
+const norm = f => typeof f === 'string' ? { problem: f, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, f)
+const gapKey = g => `${g.unit || '*'}|${g.problem}`
 let table = sq.table
 let open = []
 let setOpen = []
-let gaps = []
+let minor = []
+let polished = []
+const designGaps = []
+const addGaps = (list) => (list || []).map(g => typeof g === 'string' ? { problem: g } : g).forEach(g => { if (g && g.problem && !designGaps.some(d => gapKey(d) === gapKey(g))) designGaps.push(g) })
 for (let round = 1; round <= 3; round++) {
   if (round === 1) phase('Check')
   const c = await agent(`You did not write these briefs and must not assume their intent beyond them and the design docs (${design}). Following the game-designer level-design skill, check the set as author-level and a first-time player would:
 - each brief states all five points (${FIVE}) concretely enough to check: a duration range, a success-rate number, a feeling a playtester can confirm, a takeaway the player could say;
 - each unit has one new idea at most, and no idea appears before the ideas it needs (${JSON.stringify(p.ideas)});
-- introductions are safe, the curve has rests after spikes and never two maximum spikes in a row, and success rates fall where ${p.targets || 'the relative difficulty'} says they should;
+- introductions are safe, the curve has rests after spikes and never two maximum spikes in a row, and success rates fall where ${p.targets || 'the relative difficulty'} says they should;${p.pace ? `
+- each duration fits the clock at human pace (${p.pace}): read each brief's pace_check and redo the arithmetic;` : ''}
 - no two units do the same job (each teaches, tests or lets the player express something the others do not).
-Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}
-Return findings per unit (unit, problem) and set_findings for problems that no single brief can fix. Read-only: this check must change no files; do not edit files.`, { schema: CHECK, phase: round === 1 ? 'Check' : 'Revise', label: `check:${round}`, independent: true })
-  if (!c) { open = [{ unit: '*', problem: 'brief check did not return; the set is unverified' }]; setOpen = []; break }
-  open = c.findings || []
-  setOpen = c.set_findings || []
+Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}${notesLine}${designGaps.length ? `\nKnown design gaps, already routed to the design docs' owner (do not report them again): ${JSON.stringify(designGaps)}` : ''}
+Sort what you find. A problem the briefs or the sequence can fix is a finding: per unit in findings (unit, problem), or in set_findings when no single brief can fix it. Give each a severity: minor when it is wording or clarity that a revision can fix in place without changing what the brief asks for (a loosely stated point, a vague feeling word, a takeaway not phrased as one), blocking otherwise. A problem that comes from the design docs themselves (they contradict each other, leave the point open, or give numbers no brief can meet, so a brief that follows them faithfully still has it) is not a finding: list it in design_gaps with the unit (or "*"), the problem and the doc. Read-only: this check must change no files; do not edit files.`, { schema: CHECK, phase: round === 1 ? 'Check' : 'Revise', label: `check:${round}`, independent: true })
+  if (!c) { open = [{ unit: '*', problem: 'brief check did not return; the set is unverified' }]; setOpen = []; minor = []; break }
+  addGaps(c.design_gaps)
+  const fs = (c.findings || []).map(norm)
+  const ss = (c.set_findings || []).map(norm)
+  addGaps([...fs, ...ss].filter(f => f.design_gap))
+  open = fs.filter(f => !f.design_gap && f.severity !== 'minor')
+  setOpen = ss.filter(f => !f.design_gap && f.severity !== 'minor')
+  minor = [...fs, ...ss].filter(f => !f.design_gap && f.severity === 'minor')
   if (!open.length && !setOpen.length) break
-  log(`round ${round}: ${open.length + setOpen.length} findings`)
+  log(`round ${round}: ${open.length + setOpen.length} blocking findings, ${minor.length} minor`)
   if (round === 3) break
   phase('Revise')
-  const rv = await agent(`Following the game-designer level-design skill (progression steps 2-5 and "Designing one level", step 1), revise this set of briefs so it closes every finding below. Keep the unit list and play order (${rows.map(r => r.unit).join(', ')}); you may change any brief's five points, role, levers, first contact and notes, and, for set findings, the roles, difficulties and levers in the sequence. Keep the rules: at most one new idea per unit, no idea before the ideas it needs, safe introductions, a rest after each spike. Use only the project's own design (${design}), never another game's level data. If a finding can only be closed by changing the design docs or the unit count, leave it and list it in design_gaps.
-Unit findings:\n- ${open.map(label).join('\n- ') || 'none'}
-Set findings:\n- ${setOpen.join('\n- ') || 'none'}
-Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}
+  const rv = await agent(`Following the game-designer level-design skill (progression steps 2-5 and "Designing one level", step 1), revise this set of briefs so it closes every finding below. Keep the unit list and play order (${rows.map(r => r.unit).join(', ')}); you may change any brief's five points, role, levers, first contact, pace_check and notes, and, for set findings, the roles, difficulties and levers in the sequence. Keep the rules: at most one new idea per unit, no idea before the ideas it needs, safe introductions, a rest after each spike. Use only the project's own design (${design}), never another game's level data. If a finding can only be closed by changing the design docs or the unit count, leave it and list it in design_gaps.
+Unit findings:\n- ${[...open, ...minor.filter(f => f.unit)].map(label).join('\n- ') || 'none'}
+Set findings:\n- ${[...setOpen, ...minor.filter(f => !f.unit)].map(label).join('\n- ') || 'none'}
+Sequence:\n${table}\nBriefs: ${JSON.stringify(briefs)}${notesLine}
 Return briefs: the full revised brief of every unit you changed, with all five points; table: the revised sequence as a markdown table (the current one if unchanged); rows: the revised sequence rows, only if they changed; design_gaps. The Write step writes the briefs to files, so do not edit files here.`, { schema: REVISED, phase: 'Revise', label: `revise:${round}` })
-  if (!rv) return { status: 'blocked', reason: `revision ${round} returned nothing`, findings: open.map(label), set_findings: setOpen, sequence: table, briefs }
+  if (!rv) return { status: 'blocked', reason: `revision ${round} returned nothing`, findings: open.map(label), set_findings: setOpen.map(label), design_gaps: designGaps, sequence: table, briefs }
   ;(rv.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b })
   if (rv.table) table = rv.table
   if (Array.isArray(rv.rows) && rv.rows.length && rows.every(r => rv.rows.some(x => x.unit === r.unit))) rows.splice(0, rows.length, ...rows.map(r => rv.rows.find(x => x.unit === r.unit)))
-  gaps = rv.design_gaps || []
+  addGaps(rv.design_gaps)
 }
-if (open.length || setOpen.length) return { status: 'blocked', reason: open.some(f => f.unit === '*') ? 'the brief check did not return' : 'findings remain after the last check (three checks, two revisions)', findings: open.map(label), set_findings: setOpen, design_gaps: gaps, sequence: table, briefs, next: setOpen.length || gaps.length ? 'change the unit count or the idea order in the design docs, then run again' : 'revise the named briefs by hand or run again' }
+if (open.length || setOpen.length) return { status: 'blocked', reason: open.some(f => f.unit === '*') ? 'the brief check did not return' : 'blocking findings remain after the last check (three checks, two revisions)', findings: open.map(label), set_findings: setOpen.map(label), minor_findings: minor.map(label), design_gaps: designGaps, sequence: table, briefs, next: setOpen.length ? 'change the unit count or the idea order in the design docs, then run again' : 'revise the named briefs by hand or run again' }
+if (minor.length) {
+  const pol = await agent(`Fix these minor findings in place: wording and clarity only. Change only the words of the briefs they name; keep each brief's idea, numbers, role and levers as they are.\n- ${minor.map(label).join('\n- ')}\nBriefs: ${JSON.stringify(briefs)}\nReturn briefs: the full brief of every unit you changed, with all five points. The Write step writes them to files, so do not edit files here.`, { schema: POLISHED, phase: 'Revise', label: 'polish' })
+  if (pol) { (pol.briefs || []).forEach(b => { if (b && briefs[b.unit]) briefs[b.unit] = b }); polished = minor.map(label) }
+  else log('polish step returned nothing; minor findings left as they are')
+}
+const paceMisses = rows.map(r => briefs[r.unit]).filter(b => b && b.pace_check && b.pace_check.fits === false).map(b => `${b.unit}: ${b.pace_check.human_duration} against a clock of ${b.pace_check.clock}${b.pace_check.note ? ` (${b.pace_check.note})` : ''}`)
 
 phase('Write')
-const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in the project's brief format (${p.brief_format}${p.example ? `, shaped like ${p.example}` : ''}). Label the five points so author-level finds them: Idea, Feeling, Duration, Target success rate, Takeaway (what the player knows afterwards); add role, levers, first contact and notes below them. Edit briefs only: no level data, no targets, no other unit's finished brief. Keep any license header the project requires on new files.\nBriefs: ${JSON.stringify(rows.map(r => briefs[r.unit]))}\nReturn each unit and the path (and heading, if several share a page) of its brief.`, { schema: WRITE, phase: 'Write', label: 'write' })
+const w = await agent(`Write these briefs to ${p.output_path}, one per unit, in the project's brief format (${p.brief_format}${p.example ? `, shaped like ${p.example}` : ''}). Label the five points so author-level finds them: Idea, Feeling, Duration, Target success rate, Takeaway (what the player knows afterwards); add role, levers, first contact, the pace check (if any) and notes below them. Edit briefs only: no level data, no targets, no other unit's finished brief. Keep any license header the project requires on new files.\nBriefs: ${JSON.stringify(rows.map(r => briefs[r.unit]))}\nReturn each unit and the path (and heading, if several share a page) of its brief.`, { schema: WRITE, phase: 'Write', label: 'write' })
 if (!w) return { status: 'blocked', reason: 'writing briefs failed; inspect the working tree', briefs }
 
 phase('Docs')
@@ -242,22 +288,36 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.do
 
 phase('Docs check')
 // The check only reads, so it stays independent of the docs it judges;
-// fixes are their own step, followed by a fresh check.
-const docCheckPrompt = `Review the documentation pages touched for these briefs (${JSON.stringify(docs)}). Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Read-only: do not edit anything; return remaining issues.`
-let check = docs ? await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
-if (check && (check.issues || []).length) {
-  const docFix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name; leave anything that needs a content decision:\n- ${check.issues.join('\n- ')}`, { phase: 'Docs check', label: 'docs-fix' })
-  if (docFix) check = await agent(docCheckPrompt, { schema: ISSUES, phase: 'Docs check', label: 'docs-recheck', independent: true })
+// fixes are their own step, followed by a fresh check of every page touched
+// so far (pages a fix added included). Up to three checks and two fixes;
+// minor issues left at the end go to the handoff notes, blocking ones stop it.
+const docCheckPrompt = (pages) => `Review the documentation pages touched for these briefs: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, and pages link each other. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. Read-only: do not edit anything; return remaining issues.`
+const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' } : Object.assign({ severity: 'blocking' }, i)
+const docText = i => i.page ? `${i.page}: ${i.problem}` : i.problem
+let docPages = docs ? [...(docs.pages || [])] : []
+let docIssues = docs ? [] : [{ problem: 'docs step failed', severity: 'blocking' }]
+for (let round = 1; docs && round <= 3; round++) {
+  const c = await agent(docCheckPrompt(docPages), { schema: DOC_CHECK, phase: 'Docs check', label: round === 1 ? 'docs-check' : round === 2 ? 'docs-recheck' : `docs-recheck:${round - 1}`, independent: true })
+  if (!c) { docIssues = [{ problem: 'docs check did not return; docs unverified', severity: 'blocking' }]; break }
+  docIssues = (c.issues || []).map(docIssue)
+  if (!docIssues.length || round === 3) break
+  const fix = await agent(`Fix these documentation problems with the smallest edits, touching only the pages they name (add a page only when an issue says one is missing); leave anything that needs a content decision:\n- ${docIssues.map(docText).join('\n- ')}\nReturn pages: every page you edited or added, and left: any issue you did not fix, with why.`, { schema: DOC_FIX, phase: 'Docs check', label: round === 1 ? 'docs-fix' : `docs-fix:${round}` })
+  if (!fix) break
+  docPages = [...new Set([...docPages, ...(fix.pages || [])])]
 }
-const docIssues = check ? check.issues : ['docs check did not run; docs unverified']
+const docBlocking = docIssues.filter(i => i.severity !== 'minor')
 
 const result = {
-  status: !docs ? 'docs missing' : docIssues.length ? 'docs missing' : 'done',
+  status: docBlocking.length ? 'docs missing' : 'done',
   briefs: w.written,
   sequence: table,
-  docs: docs || 'docs step failed',
-  doc_issues: docIssues,
-  next: `The briefs and docs are written but not committed: land them with engineering-practices deliver-package or small-change. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`,
+  notes,
+  design_gaps: designGaps,
+  pace: paceMisses,
+  polished,
+  docs: docs ? Object.assign({}, docs, { pages: docPages }) : 'docs step failed',
+  doc_issues: docIssues.map(docText),
+  next: `The briefs and docs are written but not committed: land them with engineering-practices deliver-package or small-change. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.${designGaps.length ? ' Send design_gaps to the owner of the design docs (engineering-practices peer-coordination); the briefs follow the docs as written until they change.' : ''}`,
 }
 if (result.status !== 'done') return result
 
@@ -265,7 +325,7 @@ if (result.status !== 'done') return result
 // prior, so the briefs ship without being written again.
 phase('Handoff')
 const briefPaths = [...new Set(w.written.map(b => b.path))]
-const hand = await agent(`Hand off the level briefs for ${rows.map(r => r.unit).join(', ')}. If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the briefs (${briefPaths.join(', ')}) and the docs pages (${(docs.pages || []).join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or brief check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
+const hand = await agent(`Hand off the level briefs for ${rows.map(r => r.unit).join(', ')}. If you are on the default branch, cut a Conventional branch (docs/<slug>) from the latest remote default branch; otherwise stay on the current feature branch. Commit the briefs (${briefPaths.join(', ')}) and the docs pages (${docPages.join(', ') || 'as written'}) as Conventional Commits, and push. On the pushed head run the checks that apply: any docs, link or brief check the project profile names, and its test suite if this change touches anything it covers. Do not open, mark ready or merge a PR: the engineering-practices workflow named in the result does that. Follow the engineering-practices git-workflow skill. Return the branch, any open PR, the head commit SHA, whether those checks pass on that head, and the problem if not.`, { schema: HANDOFF, phase: 'Handoff', label: 'handoff' })
 if (!hand || !hand.branch) return { status: 'blocked', reason: hand && hand.problem ? hand.problem : 'handoff step returned nothing; the briefs and docs may be uncommitted', briefs: w.written, sequence: table }
 if (!hand.tests_pass) return { status: 'blocked', reason: `checks fail on ${hand.branch}${hand.head_sha ? ' at ' + hand.head_sha : ''}: ${hand.problem || 'no details'}`, briefs: w.written, sequence: table }
 result.handoff = {
@@ -274,9 +334,15 @@ result.handoff = {
   pr: hand.pr || '',
   head_sha: hand.head_sha || '',
   tests_pass: true,
-  docs: [...new Set([...briefPaths, ...(docs.pages || [])])],
+  docs: [...new Set([...briefPaths, ...docPages])],
   undocumented: docs.undocumented || [],
+  notes: [
+    ...notes.map(n => 'planning note: ' + n),
+    ...designGaps.map(g => `design gap${g.doc ? ` in ${g.doc}` : ''}: ${label(g)}`),
+    ...paceMisses.map(m => 'pace: ' + m),
+    ...docIssues.map(i => 'docs check (minor): ' + docText(i)),
+  ],
 }
-result.next = `ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.`
+result.next = `ship it without rebuilding: /engineering-practices:deliver-package { wp: "<the package>", prior: <this result> }; with no work package, /engineering-practices:land-pr { branch: "<handoff.branch>" }. Then build each unit with /game-designer:author-level { brief: "<its brief path>" } in play order, and run balance-pass over the set.${designGaps.length ? ' Send design_gaps to the owner of the design docs (engineering-practices peer-coordination).' : ''}`
 return result
 })(RUN.agent, RUN.phase, RUN.log)]); return RUN.finish(RUN_OUT)
