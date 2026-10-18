@@ -9,7 +9,7 @@ export const meta = {
     { title: 'Check', detail: 'fresh read against the brief (one reviewer for every unit of a set) and simulation (once over a set), in parallel' },
     { title: 'Revise', detail: 'smallest data change per finding, re-validate, up to two rounds; one step for the set with set_design' },
     { title: 'Docs', detail: 'progression entries and any format or procedure change, once for a set, each planned page once' },
-    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results and issues in lines this work did not change go straight to the handoff notes; an issue a fix already left ends the loop still blocking' },
+    { title: 'Docs check', detail: 'one kind per page, titles, links; up to three checks and two fixes over every page touched while blocking issues remain; minor-only results and issues already on the default branch go straight to the handoff notes; an issue a fix already left ends the loop still blocking' },
     { title: 'Handoff', detail: 'commit and push the data file (or the set\'s files) and docs, run the validator, load test and docs checks, return a handoff for engineering-practices deliver-package or land-pr' },
   ],
 }
@@ -381,11 +381,12 @@ phase('Docs check')
 // only while a blocking issue remains; minor issues go to the handoff notes,
 // blocking ones left at the end stop it.
 const docCheckPrompt = (pages) => `Review the documentation pages touched for ${fileList}: ${JSON.stringify(pages)}. Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Give each issue the page, the problem and a severity: blocking when a page mixes kinds, is missing, has a broken link or says something wrong; minor for wording, a title that could follow the pattern more closely, or a cross-link a reader can do without. ${DOC_SCOPE} Read-only: do not edit anything; return every issue.`
-// Judge only what this work changed: an issue in a line it did not add or
-// change is pre-existing, reported as minor so it goes to the notes and
-// never holds the run or starts a fix.
-const DOC_SCOPE = 'Judge only what this work changed: compare each page with the default branch (the diff from its merge base). An issue in a line this work did not add or change is pre_existing: true; report it, but it never counts as blocking.'
-const PRE = 'pre-existing (not changed by this work): '
+// Judge what this work caused: an issue already true on the default branch,
+// independent of this work, is pre-existing, reported as minor so it goes to
+// the notes and never holds the run or starts a fix. Anything this work made
+// wrong stays blocking, even in a line it did not touch.
+const DOC_SCOPE = 'Judge what this work caused, not the pages\' whole history: an issue is pre_existing: true only when the same issue is already true on the default branch at its merge base, independent of this work (check the page there to confirm); report it, but it never counts as blocking. Anything this work made wrong is not pre-existing, in whatever line it sits: a value or table its data change made stale, a link to a page it moved or renamed, a count now off.'
+const PRE = 'pre-existing (already on the default branch): '
 const docIssue = i => typeof i === 'string' ? { problem: i, severity: 'blocking' }
   : i.pre_existing ? Object.assign({}, i, { severity: 'minor', problem: String(i.problem || '').startsWith(PRE) ? i.problem : PRE + (i.problem || '') })
   : Object.assign({ severity: 'blocking' }, i)
