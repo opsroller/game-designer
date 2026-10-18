@@ -146,7 +146,7 @@ phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Already written: ${p.spec_path} and ${p.evidence_path} (reference). Add or update the explanation page about deviations from the original (every [chosen] rule that departs from observed behaviour, with reason), and add every cited source to the project's sources/credits reference page following engineering-practices provenance.`, { phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
-const check = docs ? await agent(`Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Fix what you can; return remaining issues as a list.`, { phase: 'Docs check', label: 'docs-check' }) : null
+const check = docs ? await agent(`Review the pages touched by this reconstruction (${p.spec_path}, ${p.evidence_path}, ${docs}). Each page one Diataxis kind, opening line names kind and audience, titles follow the pattern, pages link each other, no copied source text. Fix what you can; return remaining issues as a list.`, { phase: 'Docs check', label: 'docs-check', independent: true }) : null
 
 return {
   status: systems.some(s => s.failed) ? 'incomplete' : docs ? 'done' : 'docs missing',

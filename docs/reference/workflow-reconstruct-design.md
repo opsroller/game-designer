@@ -54,4 +54,4 @@ See [how to run a workflow inline](https://github.com/opsroller/engineering-prac
 
 Step labels, for `run.only` and `run.results`: `plan`, `observe:<source>`, `verify:<system>`, `spec`, `docs`, `docs-check`.
 
-Independent steps: every `verify:<system>` step. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.
+Independent steps: every `verify:<system>` step, and `docs-check`. In inline mode these briefs come back marked `independent: true`; send them to a reviewer who did not do the work (the project's code-reviewer role, a fresh session or subagent) and name them in `run.reviewers`, or the run lists them under `self_reviewed` and you report them as self-reviewed.

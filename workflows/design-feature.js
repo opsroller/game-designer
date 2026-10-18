@@ -156,7 +156,7 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(f.do
 if (!docs) return 'design-feature: docs step failed; the change is not done until its docs are written.'
 
 phase('Docs check')
-const check = await agent(`Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${docs}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Fix what you can; return remaining problems.`, { schema: GAPS, phase: 'Docs check', label: 'docs-check' })
+const check = await agent(`Review every documentation page touched for "${feature}" (${f.spec_path}, the decision record, and: ${docs}). Check: each page holds one Diataxis kind only (no instructions or opinion in reference, no reference tables or steps in explanation), how-to titles name a goal, explanation titles read "About ...", each page opens with a line saying its kind and audience, and the pages link to each other. Fix what you can; return remaining problems.`, { schema: GAPS, phase: 'Docs check', label: 'docs-check', independent: true })
 const docIssues = check ? check.gaps : ['docs check did not run; docs unverified']
 
 return { status: 'done', feature, spec: f.spec_path, decision: f.decision_path, playtest_plan: plan || 'not written', docs, doc_issues: docIssues }

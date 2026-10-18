@@ -193,7 +193,7 @@ phase('Docs')
 const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.doc_plan)}. Update the balance reference with current values and the latest simulation tables; record why the curve changed in the explanation page if the shape changed. Do not change the targets themselves: proposed target changes are not accepted yet and go in the pull request, not the reference. Changes: ${typeof applied === 'string' ? applied : JSON.stringify(applied)}\nProposals:\n${curve}`, { phase: 'Docs', label: 'docs' })
 
 phase('Docs check')
-const check = docs ? await agent(`Review the documentation pages touched in this balance pass (${docs}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Fix what you can; return remaining issues.`, { schema: ISSUES, phase: 'Docs check', label: 'docs-check' }) : null
+const check = docs ? await agent(`Review the documentation pages touched in this balance pass (${docs}). Each page one Diataxis kind (reference describes values only; explanation holds the why), opens with a line naming its kind and audience, titles follow the pattern, pages link each other. Fix what you can; return remaining issues.`, { schema: ISSUES, phase: 'Docs check', label: 'docs-check', independent: true }) : null
 
 const decisions = targetChanges.length > 0
 return {

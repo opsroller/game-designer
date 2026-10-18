@@ -168,7 +168,7 @@ const checks = [
   ['brief', () => agent(`You did not write this level and must not assume its intent beyond the brief. Following the game-designer level-design skill, read ${p.output_path} and this brief:\n${p.brief_summary}
 Walk the critical path in the data as a first-time player would. Report off brief if any of these fail, with the location in the data: it teaches or tests only the brief's idea; that idea's first contact is safe; the goal or a lead toward it is visible early; the player can tell what killed them; it is solvable as written; difficulty comes from the brief's levers, not from obscurity (hidden rules, unreadable space). Do not edit files.`, { schema: FINDINGS, phase: 'Check', label: 'check:brief', independent: true })],
   ['sim', () => p.simulator
-    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${p.simulator} on ${p.output_path} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${p.targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: 'check:sim' })
+    ? agent(`Following the game-designer economy-balance skill and its simulation.md reference, run ${p.simulator} on ${p.output_path} for every difficulty with random, greedy and goal-aware strategies, fixed recorded seeds. Compare with ${p.targets || 'the brief\'s target success rate and duration'}. Do not edit files. Return the summary table as markdown, a verdict (too easy, on target, too hard) and, if off target, the smallest data change that fixes it.`, { schema: FINDINGS, phase: 'Check', label: 'check:sim', independent: true })
     : Promise.resolve({ verdict: 'not run', findings: ['no simulator: solvability and difficulty rest on the fresh read and a playtest'] })],
 ]
 
@@ -199,7 +199,7 @@ const docs = await agent(`${DOCS_FRAGMENT}\nPlanned pages: ${JSON.stringify(p.do
 if (!docs) return { status: 'docs missing', file: p.output_path, reason: 'the change is not done until its docs are written' }
 
 phase('Docs check')
-const check = await agent(`Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Fix what you can; return remaining issues as findings with verdict "not run".`, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check' })
+const check = await agent(`Review the documentation pages touched for ${p.output_path} (${docs}). Each page holds one Diataxis kind (reference describes, explanation holds the why, how-to titles name a goal), opens with a line naming its kind and audience, and links the related pages. Fix what you can; return remaining issues as findings with verdict "not run".`, { schema: FINDINGS, phase: 'Docs check', label: 'docs-check', independent: true })
 
 const unverified = missing.map(m => `${m}: file not fully machine-checked`)
 if (sim.verdict === 'not run') unverified.push(...sim.findings)
