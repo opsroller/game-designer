@@ -1,0 +1,14 @@
+{
+  "name": "game-designer",
+  "version": "0.1.0",
+  "description": "Game designer: documents how a game plays, designs levels and progression, balances difficulty with simulation, and sets feel targets.",
+  "author": {
+    "name": "opsroller"
+  },
+  "repository": "https://github.com/opsroller/game-designer",
+  "license": "MIT",
+  "keywords": [
+    "role",
+    "job-function"
+  ]
+}
