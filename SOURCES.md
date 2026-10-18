@@ -25,6 +25,10 @@
 - **Kyle Pittman, "Math for Game Programmers: Building a Better Jump" (GDC 2016)** — https://gdcvault.com/play/1023148/Math-for-Game-Programmers-Building — specifying motion from designer intent (height, distance) rather than raw physics.
 - **Stone Librande, "One-Page Designs" (GDC 2010)** — https://www.gamedeveloper.com/design/-the-goal-of-design-is-to-efficiently-communicate-ideas- — short, visual, distilled design documents.
 - **Dan Taylor, "Ten Principles for Good Level Design" (GDC 2013)** — https://andrewdowell.artstation.com/blog/RLzG0/ten-principles-for-good-level-design — mechanics drive levels, start from emotion, clear goals, keep teaching, risk and reward.
+- **The Level Design Book, "Process" and "Blockout"** — https://book.leveldesignbook.com/process/overview — the industry level pipeline: brief, layout, blockout, playtest, then art; blockouts are cheap to change and must be tested before decoration. Basis of `author-level` (critical path first, test before polish).
+- **The Level Design Book, "Playtesting" (blockout)** — https://book.leveldesignbook.com/process/blockout/playtesting — the author is the worst tester of their own level; watch fresh players. Basis of the fresh-reviewer check in `author-level`.
+- **Koichi Hayashida on Mario level design (Game Developer)** — https://www.gamedeveloper.com/design/the-secret-to-i-mario-i-level-design — introduce, develop, twist, conclude: one idea per stage, used to check a level against its brief.
+- **Gillian Smith and Jim Whitehead, "Analyzing the Expressive Range of a Level Generator" (PCG Workshop 2010)** — https://www.pcgworkshop.com/archive/smith2010analyzing.pdf — measuring levels with computed metrics (linearity, leniency) rather than by eye; basis of validating authored data automatically and comparing it with targets.
 
 ## Playtesting practice
 

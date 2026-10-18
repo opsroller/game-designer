@@ -25,4 +25,6 @@
 
 Reference (progression table, level format); explanation (why this order); how-to ("How to add a level").
 
+To build a unit from a finished brief, run the [author-level workflow](workflow-author-level.md).
+
 Related: [reference index](index.md).

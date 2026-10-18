@@ -50,6 +50,11 @@ emotion, clear goals with open methods, keep teaching, risk and reward).
 7. Test: simulate for balance (`economy-balance`), playtest for
    understanding and feeling (`playtesting`).
 
+Once the brief is finished, steps 5-7 are the `author-level` workflow:
+it writes the data, validates it with the project's schema or loader,
+checks it with a reviewer who did not write it and the simulator, and
+updates the progression docs.
+
 ## Decision rules
 
 - If testers fail at a new idea's introduction, the introduction is wrong,
