@@ -1,6 +1,6 @@
 ---
 name: economy-balance
-description: Use when setting or tuning numbers: difficulty curves, costs and rewards, currencies and sinks, unit or ability strength, drop rates, progression pacing; and when checking balance with spreadsheets or simulated play.
+description: 'Use when setting or tuning numbers: difficulty curves, costs and rewards, currencies and sinks, unit or ability strength, drop rates, progression pacing; and when checking balance with spreadsheets or simulated play.'
 ---
 
 # Economy and balance
